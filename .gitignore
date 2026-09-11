@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.pyc
+
+# Django
+db/
+*.sqlite3
+media/
+
+# 환경/에디터
+.vscode/
+.env
