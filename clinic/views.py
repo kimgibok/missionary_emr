@@ -103,27 +103,100 @@ class DoctorWaitCountsView(APIView):
             for c in counts
         ])
         
+    
+
+# 의사 배정
+from .permissions import IsClinicalTeam, IsReceptionOrClinicalTeam, IsInfoOrReceptionOrClinicalTeam
+from .serializers import (
+    VisitDepartmentListSerializer, VisitDepartmentDetailSerializer, VisitDepartmentDoneSerializer, VisitDepartmentCreateSerializer,
+)
 
 class VisitVitalsUpdateView(generics.UpdateAPIView):
     """접수팀·진료팀 공용 - vitals/병력 입력·수정"""
     queryset = Visit.objects.all()
     serializer_class = VisitVitalsSerializer
-    permission_classes = [IsReceptionTeam]
-    
-
-# 의사 배정, 환자 정보 수정
-from .serializers import VisitDepartmentCreateSerializer
-
-
-class VisitDepartmentCreateView(generics.CreateAPIView):
-    """접수팀(의사배정) / 진료팀(전과) 공용"""
-    queryset = VisitDepartment.objects.all()
-    serializer_class = VisitDepartmentCreateSerializer
-    permission_classes = [IsReceptionTeam]
-
+    permission_classes = [IsReceptionOrClinicalTeam]
 
 class PatientDetailView(generics.RetrieveUpdateAPIView):
     """환자 기본정보 조회/수정 - 안내팀·접수팀 공용"""
     queryset = Patient.objects.all()
     serializer_class = PatientSerializer
-    permission_classes = [IsInfoOrReceptionTeam]
+    permission_classes = [IsInfoOrReceptionOrClinicalTeam]
+
+class VisitDepartmentListCreateView(generics.ListCreateAPIView):
+    """GET: 진료팀 내 배정목록 / POST: 접수팀 배정 + 진료팀 전과(추가배정) 공용"""
+
+    def get_serializer_class(self):
+        if self.request.method == 'POST':
+            return VisitDepartmentCreateSerializer
+        return VisitDepartmentListSerializer
+
+    def get_permissions(self):
+        if self.request.method == 'POST':
+            return [IsReceptionOrClinicalTeam()]
+        return [IsClinicalTeam()]
+
+    def get_queryset(self):
+        qs = VisitDepartment.objects.filter(user=self.request.user).select_related('visit__patient')
+        is_done = self.request.query_params.get('is_done')
+        if is_done is not None:
+            qs = qs.filter(is_done=(is_done.lower() == 'true'))
+        return qs.order_by('assigned_at')
+
+
+class VisitDepartmentDetailView(generics.RetrieveUpdateAPIView):
+    """GET: 진료 상세조회(환자+vitals+병력 nested) / PATCH: 진료완료 처리"""
+    queryset = VisitDepartment.objects.select_related('visit__patient')
+    permission_classes = [IsClinicalTeam]
+
+    def get_serializer_class(self):
+        if self.request.method in ('PATCH', 'PUT'):
+            return VisitDepartmentDoneSerializer
+        return VisitDepartmentDetailSerializer
+
+
+# 처방관련
+from .models import Prescription, PrescriptionDrug, MissionStock
+from .serializers import (
+    PrescriptionCreateSerializer, PrescriptionDrugCreateSerializer, DrugSearchSerializer,
+)
+
+
+class PrescriptionCreateView(generics.CreateAPIView):
+    queryset = Prescription.objects.all()
+    serializer_class = PrescriptionCreateSerializer
+    permission_classes = [IsClinicalTeam]
+
+
+class PrescriptionDrugCreateView(generics.CreateAPIView):
+    queryset = PrescriptionDrug.objects.all()
+    serializer_class = PrescriptionDrugCreateSerializer
+    permission_classes = [IsClinicalTeam]
+
+
+class DrugSearchView(generics.ListAPIView):
+    """진료팀 처방약 검색 - 현재 미션의 missionstock 기준"""
+    serializer_class = DrugSearchSerializer
+    permission_classes = [IsClinicalTeam]
+
+    def get_queryset(self):
+        mission = get_current_mission(self.request.user)
+        if mission is None:
+            return MissionStock.objects.none()
+
+        qs = MissionStock.objects.filter(mission=mission).select_related('drugbatch__drug')
+
+        cat1 = self.request.query_params.get('cat1')
+        cat2 = self.request.query_params.get('cat2')
+        search = self.request.query_params.get('search')
+
+        if cat1:
+            qs = qs.filter(drugbatch__drug__cat1_id=cat1)
+        if cat2:
+            qs = qs.filter(drugbatch__drug__cat2_id=cat2)
+        if search:
+            qs = qs.filter(
+                Q(drugbatch__drug__name__icontains=search) |
+                Q(drugbatch__drug__ingredient__icontains=search)
+            )
+        return qs

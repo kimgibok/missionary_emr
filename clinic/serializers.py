@@ -45,3 +45,78 @@ class VisitDepartmentCreateSerializer(serializers.ModelSerializer):
         model = VisitDepartment
         fields = ['id', 'visit', 'user']
         read_only_fields = ['id']
+        
+
+## 진료팀이 확인할 데이터 serializer
+class VisitDetailSerializer(serializers.ModelSerializer):
+    """진료 상세화면 - vitals/병력 전체 포함"""
+    patient = PatientSerializer(read_only=True)
+
+    class Meta:
+        model = Visit
+        fields = [
+            'id', 'reg_no', 'visit_date', 'patient', 'weight',
+            'bp', 'pr', 'bt', 'bst', 'is_preg',
+            'has_htn', 'has_dm', 'has_tbc', 'has_hepatitis',
+            'has_allergy', 'allergy_detail',
+            'has_operation', 'operation_detail',
+            'history_etc', 'chief_complaint', 'symptom_duration',
+        ]
+
+
+class VisitDepartmentListSerializer(serializers.ModelSerializer):
+    """진료팀 - 내 배정 목록"""
+    visit = VisitListSerializer(read_only=True)
+
+    class Meta:
+        model = VisitDepartment
+        fields = ['id', 'visit', 'assigned_at', 'is_done']
+
+
+class VisitDepartmentDetailSerializer(serializers.ModelSerializer):
+    """진료팀 - 진료 상세 조회 (환자+vitals+병력 nested)"""
+    visit = VisitDetailSerializer(read_only=True)
+
+    class Meta:
+        model = VisitDepartment
+        fields = ['id', 'visit', 'assigned_at', 'is_done']
+
+
+class VisitDepartmentDoneSerializer(serializers.ModelSerializer):
+    """진료 완료 처리용"""
+    class Meta:
+        model = VisitDepartment
+        fields = ['id', 'is_done']
+        read_only_fields = ['id']
+        
+## 진료팀 - 처방 관련 serializer
+from .models import Prescription, PrescriptionDrug, MissionStock
+
+
+class PrescriptionCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Prescription
+        fields = ['id', 'visit_department', 'department', 'clinical_note']
+        read_only_fields = ['id']
+
+
+class PrescriptionDrugCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PrescriptionDrug
+        fields = [
+            'id', 'prescription', 'drug',
+            'dose_per_intake', 'frequency_per_day', 'duration_days', 'quantity',
+        ]
+        read_only_fields = ['id']
+        extra_kwargs = {'quantity': {'required': False}}
+
+
+class DrugSearchSerializer(serializers.Serializer):
+    """진료팀 처방약 검색 - missionstock 기준, drug 정보 nested"""
+    id = serializers.IntegerField()  # mission_stock id
+    drug_name = serializers.CharField(source='drugbatch.drug.name')
+    ingredient = serializers.CharField(source='drugbatch.drug.ingredient')
+    usage = serializers.CharField(source='drugbatch.drug.usage')
+    cat1 = serializers.IntegerField(source='drugbatch.drug.cat1_id')
+    cat2 = serializers.IntegerField(source='drugbatch.drug.cat2_id')
+    remaining_qty = serializers.IntegerField()
