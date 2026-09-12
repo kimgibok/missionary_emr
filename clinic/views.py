@@ -7,8 +7,10 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import Patient, Visit, VisitDepartment
-from .permissions import IsInfoTeam, IsInfoOrReceptionTeam, get_active_memberships
-from .serializers import PatientSerializer, VisitCreateSerializer
+from .permissions import IsInfoTeam, IsReceptionTeam, IsInfoOrReceptionTeam, get_active_memberships
+from .serializers import (
+    PatientSerializer, VisitCreateSerializer, VisitListSerializer, VisitVitalsSerializer,
+)
 
 
 def get_current_mission(user):
@@ -35,9 +37,30 @@ class PatientListCreateView(generics.ListCreateAPIView):
         return qs
 
 
-class VisitCreateView(generics.CreateAPIView):
-    serializer_class = VisitCreateSerializer
-    permission_classes = [IsInfoTeam]
+class VisitListCreateView(generics.ListCreateAPIView):
+    """GET: 접수팀 대기리스트 / POST: 안내팀 방문등록"""
+
+    def get_serializer_class(self):
+        if self.request.method == 'POST':
+            return VisitCreateSerializer
+        return VisitListSerializer
+
+    def get_permissions(self):
+        if self.request.method == 'POST':
+            return [IsInfoTeam()]
+        return [IsReceptionTeam()]
+
+    def get_queryset(self):
+        mission = get_current_mission(self.request.user)
+        if mission is None:
+            return Visit.objects.none()
+
+        qs = Visit.objects.filter(mission=mission).select_related('patient')
+
+        if self.request.query_params.get('status') == 'waiting_vitals':
+            qs = qs.filter(visit_date=date.today(), pr__isnull=True)
+
+        return qs.order_by('reg_no')
 
     def create(self, request, *args, **kwargs):
         mission = get_current_mission(request.user)
@@ -79,3 +102,28 @@ class DoctorWaitCountsView(APIView):
             {'doctor_id': c['user_id'], 'doctor_name': c['user__name'], 'waiting_count': c['waiting_count']}
             for c in counts
         ])
+        
+
+class VisitVitalsUpdateView(generics.UpdateAPIView):
+    """접수팀·진료팀 공용 - vitals/병력 입력·수정"""
+    queryset = Visit.objects.all()
+    serializer_class = VisitVitalsSerializer
+    permission_classes = [IsReceptionTeam]
+    
+
+# 의사 배정, 환자 정보 수정
+from .serializers import VisitDepartmentCreateSerializer
+
+
+class VisitDepartmentCreateView(generics.CreateAPIView):
+    """접수팀(의사배정) / 진료팀(전과) 공용"""
+    queryset = VisitDepartment.objects.all()
+    serializer_class = VisitDepartmentCreateSerializer
+    permission_classes = [IsReceptionTeam]
+
+
+class PatientDetailView(generics.RetrieveUpdateAPIView):
+    """환자 기본정보 조회/수정 - 안내팀·접수팀 공용"""
+    queryset = Patient.objects.all()
+    serializer_class = PatientSerializer
+    permission_classes = [IsInfoOrReceptionTeam]
