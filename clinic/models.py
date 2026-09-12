@@ -128,3 +128,86 @@ class VisitDepartment(models.Model):
 
     def __str__(self):
         return f"{self.visit} → {self.user}"
+    
+    
+class Drug(models.Model):
+    cat1 = models.ForeignKey(DrugCategory1, on_delete=models.PROTECT, related_name="drugs")
+    cat2 = models.ForeignKey(DrugCategory2, on_delete=models.PROTECT, related_name="drugs")
+    name = models.CharField(max_length=100)
+    ingredient = models.CharField(max_length=200, blank=True)
+    usage = models.CharField(max_length=200, blank=True)
+
+    def __str__(self):
+        return self.name
+    
+
+class DrugBatch(models.Model):
+    class Source(models.TextChoices):
+        DONATION = "donation", "후원"
+        LOCAL = "local", "현지"
+        PURCHASE = "purchase", "구매"
+        LOCAL_PURCHASE = "local_purchase", "현지구매"
+        ETC = "etc", "기타"
+
+    drug = models.ForeignKey(Drug, on_delete=models.PROTECT, related_name="batches")
+    source = models.CharField(max_length=20, choices=Source.choices)
+    source_detail = models.CharField(max_length=100, blank=True)  # "기타" 선택 시 상세 내용
+    received_date = models.DateField()  # 입고일
+    expiry_date = models.DateField()
+    unit_qty = models.PositiveIntegerField()
+    unit_label = models.CharField(max_length=20)
+    total_qty = models.PositiveIntegerField()   # 입고량
+    remaining_qty = models.PositiveIntegerField()   # 창고 잔량
+
+    def __str__(self):
+        return f"{self.drug} - {self.expiry_date} (잔량 {self.remaining_qty})"
+    
+    
+class MissionStock(models.Model):
+    """
+    창고 재고(DrugBatch) 중 이번 미션에 챙겨간 몫.
+    처방 시 재고 차감은 여기서 이뤄짐 (DrugBatch가 아님).
+    """
+    drugbatch = models.ForeignKey(DrugBatch, on_delete=models.PROTECT, related_name="mission_stocks")
+    mission = models.ForeignKey(Mission, on_delete=models.CASCADE, related_name="mission_stocks")
+    allocated_qty = models.PositiveIntegerField()   # 이번 미션에 챙겨갼 양
+    remaining_qty = models.PositiveIntegerField()   # 현장 잔량(처방 시 차감)
+    donated_qty = models.PositiveIntegerField(default=0) # 현지 기부량(정산 시 입력)
+    is_settled = models.BooleanField(default=False)     # 정산 완료 여부
+
+    def __str__(self):
+        return f"{self.drugbatch.drug} - {self.mission} (현장잔량 {self.remaining_qty})"
+    
+    
+class Prescription(models.Model):
+    """
+    department는 여기서 확정됨 (VisitDepartment 배정 시점이 아니라
+    의사가 실제 진료/처방하는 순간에 결정).
+    """
+    visit_department = models.ForeignKey(VisitDepartment, on_delete=models.CASCADE, related_name="prescriptions")
+    department = models.ForeignKey(Department, on_delete=models.PROTECT, related_name="prescriptions")  # 진료 시점에 확정
+    clinical_note = models.TextField(blank=True)
+    is_dispensed = models.BooleanField(default=False)   # 약 수령 완료
+
+    def __str__(self):
+        return f"{self.visit_department} - {self.department}"
+    
+
+class PrescriptionDrug(models.Model):
+    prescription = models.ForeignKey(Prescription, on_delete=models.CASCADE, related_name="items")
+    drug = models.ForeignKey(Drug, on_delete=models.PROTECT, related_name="prescription_items")
+
+    dose_per_intake = models.FloatField(null=True, blank=True)        # 1회 복용량
+    frequency_per_day = models.PositiveIntegerField(null=True, blank=True)  # 1일 복용횟수 (경구/소아약만)
+    duration_days = models.PositiveIntegerField(null=True, blank=True)      # 복용일수 (경구/소아약만)
+    quantity = models.PositiveIntegerField(default=0)   # 최종 수량, 재고차감 기준
+
+    def save(self, *args, **kwargs):
+        # 1회 복용량 × 1일 횟수 × 복용일수가 다 있으면 quantity 자동 계산
+        # (외용약처럼 세 값이 없는 경우엔 quantity를 직접 입력한 값 그대로 사용)
+        if self.dose_per_intake and self.frequency_per_day and self.duration_days:
+            self.quantity = round(self.dose_per_intake * self.frequency_per_day * self.duration_days)
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.prescription} - {self.drug} x{self.quantity}"
