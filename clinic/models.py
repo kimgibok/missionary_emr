@@ -202,10 +202,11 @@ class PrescriptionDrug(models.Model):
     duration_days = models.PositiveIntegerField(null=True, blank=True)      # 복용일수 (경구/소아약만)
     quantity = models.PositiveIntegerField(default=0)   # 최종 수량, 재고차감 기준
 
-    def save(self, *args, **kwargs):
+        
+    def save(self, *args, skip_recalculate=False, **kwargs):
         # 1회 복용량 × 1일 횟수 × 복용일수가 다 있으면 quantity 자동 계산
         # (외용약처럼 세 값이 없는 경우엔 quantity를 직접 입력한 값 그대로 사용)
-        if self.dose_per_intake and self.frequency_per_day and self.duration_days:
+        if not skip_recalculate and self.dose_per_intake and self.frequency_per_day and self.duration_days:
             self.quantity = round(self.dose_per_intake * self.frequency_per_day * self.duration_days)
         super().save(*args, **kwargs)
 

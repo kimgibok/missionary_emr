@@ -120,3 +120,66 @@ class DrugSearchSerializer(serializers.Serializer):
     cat1 = serializers.IntegerField(source='drugbatch.drug.cat1_id')
     cat2 = serializers.IntegerField(source='drugbatch.drug.cat2_id')
     remaining_qty = serializers.IntegerField()
+    
+    
+## 약국팀
+class MissionStockSerializer(serializers.ModelSerializer):
+    """약국팀 재고조회 - drugbatch/drug 정보 nested"""
+    drug_name = serializers.CharField(source='drugbatch.drug.name', read_only=True)
+    ingredient = serializers.CharField(source='drugbatch.drug.ingredient', read_only=True)
+    expiry_date = serializers.DateField(source='drugbatch.expiry_date', read_only=True)
+    source = serializers.CharField(source='drugbatch.source', read_only=True)
+
+    class Meta:
+        model = MissionStock
+        fields = [
+            'id', 'drug_name', 'ingredient', 'expiry_date', 'source',
+            'allocated_qty', 'remaining_qty', 'donated_qty', 'is_settled',
+        ]
+
+
+class PrescriptionDrugItemSerializer(serializers.ModelSerializer):
+    drug_name = serializers.CharField(source='drug.name', read_only=True)
+
+    class Meta:
+        model = PrescriptionDrug
+        fields = ['id', 'drug_name', 'quantity']
+
+
+class PrescriptionWithItemsSerializer(serializers.ModelSerializer):
+    """약국팀 처방대기리스트에서 쓰는 처방 표현 - 처방약 목록 nested"""
+    items = PrescriptionDrugItemSerializer(many=True, read_only=True)
+    department_name = serializers.CharField(source='department.name', read_only=True)
+
+    class Meta:
+        model = Prescription
+        fields = ['id', 'department_name', 'items']
+
+
+class PharmacyQueueSerializer(serializers.ModelSerializer):
+    """약국팀 대기리스트 - 환자 단위, 미수령 처방들 nested"""
+    patient = PatientSerializer(read_only=True)
+    prescriptions = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Visit
+        fields = ['id', 'reg_no', 'patient', 'prescriptions']
+
+    def get_prescriptions(self, obj):
+        qs = Prescription.objects.filter(
+            visit_department__visit=obj, is_dispensed=False
+        ).select_related('department').prefetch_related('items__drug')
+        return PrescriptionWithItemsSerializer(qs, many=True).data
+    
+    
+class PrescriptionDrugUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PrescriptionDrug
+        fields = ['id', 'prescription', 'drug', 'dose_per_intake', 'frequency_per_day', 'duration_days', 'quantity']
+        read_only_fields = ['id']
+
+    def update(self, instance, validated_data):
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save(skip_recalculate=True)
+        return instance
