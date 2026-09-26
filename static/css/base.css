@@ -1,0 +1,74 @@
+/* 폰트 등록 */
+@font-face {
+    font-family: 'Pretendard';
+    font-weight: 400;
+    src: url('/static/fonts/Pretendard-Regular.woff2') format('woff2');
+    font-display: swap;
+}
+@font-face {
+    font-family: 'Pretendard';
+    font-weight: 500;
+    src: url('/static/fonts/Pretendard-Medium.woff2') format('woff2');
+    font-display: swap;
+}
+@font-face {
+    font-family: 'Pretendard';
+    font-weight: 600;
+    src: url('/static/fonts/Pretendard-SemiBold.woff2') format('woff2');
+    font-display: swap;
+}
+@font-face {
+    font-family: 'Pretendard';
+    font-weight: 700;
+    src: url('/static/fonts/Pretendard-Bold.woff2') format('woff2');
+    font-display: swap;
+}
+
+/* 디자인 토큰 */
+:root {
+    --color-bg: #FAFAFA;
+    --color-surface: #FFFFFF;
+    --color-border: #E5E5E5;
+    --color-text: #1D1D1F;
+    --color-text-muted: #6E6E73;
+    --color-accent: #2C4A63;
+    --color-accent-hover: #23384A;
+    --color-success: #3A7D5C;
+    --color-danger: #B23A2E;
+
+    --radius: 14px;
+    --shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+
+    --font-sans: 'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* 기본 리셋 */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    font-family: var(--font-sans);
+    background: var(--color-bg);
+    color: var(--color-text);
+    -webkit-font-smoothing: antialiased;
+    line-height: 1.5;
+}
+
+button, input, select, textarea {
+    font-family: inherit;
+    font-size: inherit;
+}
+
+button {
+    cursor: pointer;
+    border: none;
+    background: none;
+}
+
+a { color: inherit; text-decoration: none; }
+
+/* 등록번호 등 "티켓" 숫자에 쓸 유틸 클래스 */
+.ticket-number {
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
