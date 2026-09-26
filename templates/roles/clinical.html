@@ -1,0 +1,22 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ 진료팀 }} · 의료선교 EMR</title>
+    <link rel="stylesheet" href="{% static 'css/base.css' %}">
+    <link rel="stylesheet" href="{% static 'css/nav.css' %}">
+    <link rel="stylesheet" href="{% static 'css/page.css' %}">
+</head>
+<body>
+    {% include 'partials/nav.html' %}
+    <main class="page-content">
+        <h1>{{ 진료팀 }}</h1>
+        <p style="color: var(--color-text-muted); margin-top: 8px;">준비중입니다.</p>
+    </main>
+
+    <script src="{% static 'js/api.js' %}"></script>
+    <script src="{% static 'js/nav.js' %}"></script>
+</body>
+</html>

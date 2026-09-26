@@ -1,0 +1,23 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>미션 선택 · 의료선교 EMR</title>
+    <link rel="stylesheet" href="{% static 'css/base.css' %}">
+    <link rel="stylesheet" href="{% static 'css/login.css' %}">
+</head>
+<body>
+    <div class="login-wrap">
+        <div class="login-card">
+            <h1 class="login-title">미션 선택</h1>
+            <p class="login-subtitle">참여중인 미션이 여러 개입니다. 하나를 선택해주세요.</p>
+            <div id="mission-list"></div>
+        </div>
+    </div>
+
+    <script src="{% static 'js/api.js' %}"></script>
+    <script src="{% static 'js/select_mission.js' %}"></script>
+</body>
+</html>

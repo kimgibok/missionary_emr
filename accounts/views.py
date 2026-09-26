@@ -47,6 +47,7 @@ class LoginView(APIView):
         return Response({
             'token': token.key,
             'name': user.name,
+            'is_superuser': user.is_superuser,
             'current_missions': current_missions,
         })
 
