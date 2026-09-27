@@ -72,3 +72,99 @@ a { color: inherit; text-decoration: none; }
     font-weight: 600;
     letter-spacing: 0.02em;
 }
+
+
+.card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.card-title {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 14px;
+}
+
+/* 폼을 grid로 짜서, 화면 좁아지면 자동으로 1열로 줄어들게 */
+.form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 14px;
+}
+
+.form-grid .btn-primary {
+    grid-column: 1 / -1;
+}
+
+.btn-primary.btn-inline {
+    width: auto;
+    padding: 12px 20px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+/* 터치 영역 최소 44px 보장 (애플 HIG 권장 기준) */
+.field-input, .btn-primary, .nav-link, .btn-inline {
+    min-height: 44px;
+}
+
+.field-label {
+    display: block;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--color-text-muted);
+    margin-bottom: 6px;
+}
+
+.field-input {
+    width: 100%;
+    padding: 12px 14px;
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    font-size: 15px;
+    background: var(--color-surface);
+    margin-bottom: 18px;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    appearance: none;
+    -webkit-appearance: none;
+}
+
+.field-input:focus {
+    outline: none;
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 3px rgba(44, 74, 99, 0.12);
+}
+
+/* select는 appearance:none으로 기본 화살표가 사라지니 커스텀 화살표로 대체 */
+select.field-input {
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236E6E73' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    background-size: 16px;
+    padding-right: 36px;
+}
+
+/* form-grid 안에서는 grid gap이 간격을 담당하니 중복 마진 제거 */
+.form-grid .field-input {
+    margin-bottom: 0;
+}
+
+.btn-primary {
+    width: 100%;
+    padding: 13px 20px;
+    background: var(--color-accent);
+    color: white;
+    border-radius: 12px;
+    font-size: 15px;
+    font-weight: 600;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+    transition: background 0.15s ease, transform 0.05s ease;
+}
+
+.btn-primary:hover { background: var(--color-accent-hover); }
+.btn-primary:active { transform: scale(0.98); }
+.btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }

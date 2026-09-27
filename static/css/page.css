@@ -3,3 +3,9 @@
     margin: 0 auto;
     padding: 40px 24px;
 }
+
+@media (max-width: 640px) {
+    .page-content {
+        padding: 20px 16px;
+    }
+}
