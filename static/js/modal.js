@@ -18,3 +18,7 @@ function openModal({ title, bodyHtml, confirmLabel = '확인', onConfirm }) {
     document.getElementById('modal-cancel').onclick = close;
     overlay.classList.add('open');
 }
+
+function closeModal() {
+    document.getElementById('modal-overlay').classList.remove('open');
+}

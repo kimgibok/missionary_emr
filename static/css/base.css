@@ -168,3 +168,84 @@ select.field-input {
 .btn-primary:hover { background: var(--color-accent-hover); }
 .btn-primary:active { transform: scale(0.98); }
 .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* hidden 속성이 display:flex 같은 클래스 스타일에 덮어씌워지지 않게 */
+[hidden] {
+    display: none !important;
+}
+
+.error-message {
+    font-size: 13px;
+    color: var(--color-danger);
+    min-height: 18px;
+    margin-bottom: 8px;
+    white-space: pre-line;
+}
+
+/* 261002 : 접수팀에서 환자등록 할 경우 환자 검색 결과 / 신규등록 티켓 (안내팀·접수팀 공용) */
+.search-row {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 14px;
+}
+
+.search-row .field-input {
+    flex: 1;
+    margin-bottom: 0;
+}
+
+.patient-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.patient-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 14px;
+    background: var(--color-bg);
+    border-radius: 10px;
+}
+
+.patient-item-name {
+    font-weight: 600;
+}
+
+.patient-item-meta {
+    font-size: 13px;
+    color: var(--color-text-muted);
+}
+
+.ticket {
+    background: var(--color-surface);
+    border: 1px dashed var(--color-accent);
+    border-radius: var(--radius);
+    padding: 24px;
+    text-align: center;
+    margin-top: 20px;
+}
+
+.ticket-reg-no {
+    font-size: 48px;
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+    color: var(--color-accent);
+}
+
+.ticket-label {
+    font-size: 13px;
+    color: var(--color-text-muted);
+    margin-top: 4px;
+}
+
+@media (max-width: 480px) {
+    .search-row {
+        flex-direction: column;
+    }
+
+    .ticket-reg-no {
+        font-size: 36px;
+    }
+}

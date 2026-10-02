@@ -4,19 +4,166 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ 접수팀 }} · 의료선교 EMR</title>
+    <title>접수팀 · 의료선교 EMR</title>
     <link rel="stylesheet" href="{% static 'css/base.css' %}">
     <link rel="stylesheet" href="{% static 'css/nav.css' %}">
     <link rel="stylesheet" href="{% static 'css/page.css' %}">
+    <link rel="stylesheet" href="{% static 'css/modal.css' %}">
+    <link rel="stylesheet" href="{% static 'css/reception.css' %}">
 </head>
 <body>
     {% include 'partials/nav.html' %}
     <main class="page-content">
-        <h1>{{ 접수팀 }}</h1>
-        <p style="color: var(--color-text-muted); margin-top: 8px;">준비중입니다.</p>
+        <h1>접수팀</h1>
+
+        <section class="card">
+            <h2 class="card-title">환자 검색 / 신규 등록</h2>
+            <div class="search-row">
+                <input class="field-input" type="text" id="search-input" placeholder="이름으로 검색">
+                <button class="btn-primary btn-inline" type="button" id="search-btn">검색</button>
+            </div>
+            <div id="search-results" class="patient-list"></div>
+
+            <h3 class="form-section-title">신규 환자 등록</h3>
+            <form id="new-patient-form" class="form-grid">
+                <div>
+                    <label class="field-label">이름(한글)</label>
+                    <input class="field-input" type="text" id="name_kr" required>
+                </div>
+                <div>
+                    <label class="field-label">이름(현지어)</label>
+                    <input class="field-input" type="text" id="name_local">
+                </div>
+                <div>
+                    <label class="field-label">성별</label>
+                    <select class="field-input" id="sex" required>
+                        <option value="M">남</option>
+                        <option value="F">여</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="field-label">출생연도</label>
+                    <input class="field-input" type="number" id="birth_year" required>
+                </div>
+                <div>
+                    <label class="field-label">체중 (kg, 선택)</label>
+                    <input class="field-input" type="number" step="0.1" id="weight">
+                </div>
+                <button class="btn-primary" type="submit">환자 등록 + 방문 등록</button>
+            </form>
+        </section>
+
+        <section class="card">
+            <div class="card-head">
+                <h2 class="card-title">접수 대기</h2>
+                <span class="count-badge" id="waiting-count">0명</span>
+            </div>
+            <div id="waiting-list" class="queue-list"></div>
+        </section>
+
+        <section class="card">
+            <div class="card-head">
+                <h2 class="card-title">오늘 접수 완료</h2>
+                <span class="count-badge" id="done-count">0명</span>
+            </div>
+            <p class="section-hint">눌러서 접수 기록을 다시 열고 수정할 수 있어요. 배정된 의사의 진료가 모두 끝나면 수정할 수 없습니다.</p>
+            <div id="done-list" class="queue-list"></div>
+        </section>
+
+        <section class="intake-panel" id="intake-card" hidden>
+            <div class="intake-header">
+                <div class="intake-ticket">
+                    <span class="intake-ticket-no ticket-number" id="intake-reg-no"></span>
+                    <span class="intake-ticket-label">등록번호</span>
+                </div>
+                <div class="intake-patient">
+                    <div class="intake-patient-name" id="intake-name"></div>
+                    <div class="intake-patient-meta" id="intake-meta"></div>
+                </div>
+                <div class="intake-actions">
+                    <button class="btn-secondary btn-small" id="edit-patient-btn" type="button">환자 정보 수정</button>
+                    <button class="btn-secondary btn-small" id="close-intake-btn" type="button">닫기</button>
+                </div>
+            </div>
+
+            <p class="readonly-notice" id="readonly-notice" hidden>배정된 모든 진료가 완료되어 접수 기록을 수정할 수 없습니다.</p>
+
+            <form id="intake-form">
+                <h3 class="form-section-title">활력징후</h3>
+                <div class="form-grid compact">
+                    <div>
+                        <label class="field-label" for="bp">혈압 (BP)</label>
+                        <input class="field-input" type="text" id="bp" placeholder="120/80">
+                    </div>
+                    <div>
+                        <label class="field-label" for="pr">맥박 (PR)</label>
+                        <input class="field-input" type="number" id="pr" inputmode="numeric">
+                    </div>
+                    <div>
+                        <label class="field-label" for="bt">체온 (BT)</label>
+                        <input class="field-input" type="number" step="0.1" id="bt" inputmode="decimal">
+                    </div>
+                    <div>
+                        <label class="field-label" for="bst">혈당 (BST)</label>
+                        <input class="field-input" type="number" step="0.1" id="bst" inputmode="decimal">
+                    </div>
+                </div>
+
+                <div class="toggle-row" id="preg-row" hidden>
+                    <label class="toggle"><input type="checkbox" id="is_preg"><span>임신 중</span></label>
+                </div>
+
+                <h3 class="form-section-title">병력</h3>
+                <div class="toggle-row">
+                    <label class="toggle"><input type="checkbox" id="has_htn"><span>고혈압</span></label>
+                    <label class="toggle"><input type="checkbox" id="has_dm"><span>당뇨</span></label>
+                    <label class="toggle"><input type="checkbox" id="has_tbc"><span>결핵</span></label>
+                    <label class="toggle"><input type="checkbox" id="has_hepatitis"><span>간염</span></label>
+                    <label class="toggle"><input type="checkbox" id="has_allergy"><span>알레르기</span></label>
+                    <label class="toggle"><input type="checkbox" id="has_operation"><span>수술 이력</span></label>
+                </div>
+
+                <div class="detail-field" id="allergy-field" hidden>
+                    <label class="field-label" for="allergy_detail">알레르기 상세 (약물/음식)</label>
+                    <input class="field-input" type="text" id="allergy_detail">
+                </div>
+                <div class="detail-field" id="operation-field" hidden>
+                    <label class="field-label" for="operation_detail">수술 이력 상세</label>
+                    <input class="field-input" type="text" id="operation_detail">
+                </div>
+                <div class="detail-field">
+                    <label class="field-label" for="history_etc">기타 병력</label>
+                    <input class="field-input" type="text" id="history_etc">
+                </div>
+
+                <h3 class="form-section-title">주호소</h3>
+                <div class="form-grid">
+                    <div>
+                        <label class="field-label" for="chief_complaint">주호소 *</label>
+                        <input class="field-input" type="text" id="chief_complaint" required>
+                    </div>
+                    <div>
+                        <label class="field-label" for="symptom_duration">발현시기 및 기간</label>
+                        <input class="field-input" type="text" id="symptom_duration">
+                    </div>
+                </div>
+
+                <h3 class="form-section-title">의사 배정 <span class="hint">여러 명 선택 가능</span></h3>
+                <div class="doctor-picker" id="doctor-picker"></div>
+
+                <p class="error-message" id="intake-error"></p>
+                <button class="btn-primary" type="submit" id="intake-submit">저장 및 배정</button>
+            </form>
+        </section>
     </main>
 
+    {% include 'partials/modal.html' %}
+    <div class="toast" id="toast" role="status"></div>
+
     <script src="{% static 'js/api.js' %}"></script>
+    <script src="{% static 'js/patient-intake.js' %}"></script>
     <script src="{% static 'js/nav.js' %}"></script>
+    <script src="{% static 'js/modal.js' %}"></script>
+    <script src="{% static 'js/reception.js' %}"></script>
 </body>
 </html>

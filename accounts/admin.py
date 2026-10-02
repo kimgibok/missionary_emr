@@ -5,9 +5,9 @@ from .models import User
 
 class CustomUserAdmin(UserAdmin):
     fieldsets = UserAdmin.fieldsets + (
-        ('추가 정보', {'fields': ('name', 'age')}),
+        ('추가 정보', {'fields': ('name', 'age', 'primary_department')}),
     )
-    list_display = ('username', 'name', 'is_staff', 'is_superuser')
+    list_display = ('username', 'name', 'primary_department', 'is_staff', 'is_superuser')
 
 
 admin.site.register(User, CustomUserAdmin)

@@ -6,10 +6,10 @@ from rest_framework import generics, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Patient, Visit, VisitDepartment
+from .models import Patient, Visit, VisitDepartment, MissionMembership
 from .permissions import IsInfoTeam, IsReceptionTeam, IsInfoOrReceptionTeam, get_active_memberships
 from .serializers import (
-    PatientSerializer, VisitCreateSerializer, VisitListSerializer, VisitVitalsSerializer,
+    PatientSerializer, VisitCreateSerializer, VisitListSerializer, VisitVitalsSerializer, VisitIntakeListSerializer, VisitIntakeDetailSerializer,
 )
 
 
@@ -43,11 +43,11 @@ class VisitListCreateView(generics.ListCreateAPIView):
     def get_serializer_class(self):
         if self.request.method == 'POST':
             return VisitCreateSerializer
-        return VisitListSerializer
+        return VisitIntakeListSerializer
 
     def get_permissions(self):
         if self.request.method == 'POST':
-            return [IsInfoTeam()]
+            return [IsInfoOrReceptionTeam()]
         return [IsReceptionTeam()]
 
     def get_queryset(self):
@@ -55,10 +55,22 @@ class VisitListCreateView(generics.ListCreateAPIView):
         if mission is None:
             return Visit.objects.none()
 
-        qs = Visit.objects.filter(mission=mission).select_related('patient')
+        qs = (
+            Visit.objects.filter(mission=mission)
+            .select_related('patient')
+            .prefetch_related('visit_departments__user__primary_department')
+        )
 
-        if self.request.query_params.get('status') == 'waiting_vitals':
-            qs = qs.filter(visit_date=date.today(), pr__isnull=True)
+        status_param = self.request.query_params.get('status')
+        today = date.today()
+
+        if status_param == 'waiting_vitals':
+            # 접수 대기 = 오늘 방문 중 주호소가 아직 비어 있는 환자 (등록번호 순)
+            return qs.filter(visit_date=today, chief_complaint='').order_by('reg_no')
+
+        if status_param == 'intake_done':
+            # 접수 완료 = 주호소가 입력된 환자 (등록번호 큰 순 = 최근 등록한 환자가 위)
+            return qs.filter(visit_date=today).exclude(chief_complaint='').order_by('-reg_no')
 
         return qs.order_by('reg_no')
 
@@ -85,6 +97,7 @@ class VisitListCreateView(generics.ListCreateAPIView):
 
 
 class DoctorWaitCountsView(APIView):
+    """이번 미션의 진료팀 의사 전원 + 각자의 대기 인원 (대기 0명인 의사도 포함)"""
     permission_classes = [IsInfoOrReceptionTeam]
 
     def get(self, request):
@@ -92,15 +105,27 @@ class DoctorWaitCountsView(APIView):
         if mission is None:
             return Response([])
 
-        counts = (
-            VisitDepartment.objects.filter(visit__mission=mission, is_done=False)
-            .values('user_id', 'user__name')
-            .annotate(waiting_count=Count('id'))
-            .order_by('user__name')
+        doctors = MissionMembership.objects.filter(
+            mission=mission, role__name='진료팀'
+        ).select_related('user', 'user__primary_department')
+
+        counts = dict(
+            VisitDepartment.objects.filter(
+                visit__mission=mission, visit__visit_date=date.today(), is_done=False
+            )
+            .values('user_id')
+            .annotate(c=Count('id'))
+            .values_list('user_id', 'c')
         )
+
         return Response([
-            {'doctor_id': c['user_id'], 'doctor_name': c['user__name'], 'waiting_count': c['waiting_count']}
-            for c in counts
+            {
+                'doctor_id': m.user_id,
+                'doctor_name': m.user.name or m.user.username,
+                'department_code': m.user.primary_department.name if m.user.primary_department else None,
+                'waiting_count': counts.get(m.user_id, 0),
+            }
+            for m in doctors
         ])
         
     
@@ -111,11 +136,15 @@ from .serializers import (
     VisitDepartmentListSerializer, VisitDepartmentDetailSerializer, VisitDepartmentDoneSerializer, VisitDepartmentCreateSerializer,
 )
 
-class VisitVitalsUpdateView(generics.UpdateAPIView):
-    """접수팀·진료팀 공용 - vitals/병력 입력·수정"""
-    queryset = Visit.objects.all()
-    serializer_class = VisitVitalsSerializer
+class VisitVitalsUpdateView(generics.RetrieveUpdateAPIView):
+    """접수팀·진료팀 공용 - 접수 기록 조회 + vitals/병력 입력·수정"""
+    queryset = Visit.objects.select_related('patient').prefetch_related('visit_departments__user__primary_department')
     permission_classes = [IsReceptionOrClinicalTeam]
+
+    def get_serializer_class(self):
+        if self.request.method in ('PATCH', 'PUT'):
+            return VisitVitalsSerializer
+        return VisitIntakeDetailSerializer
 
 class PatientDetailView(generics.RetrieveUpdateAPIView):
     """환자 기본정보 조회/수정 - 안내팀·접수팀 공용"""
@@ -144,15 +173,26 @@ class VisitDepartmentListCreateView(generics.ListCreateAPIView):
         return qs.order_by('assigned_at')
 
 
-class VisitDepartmentDetailView(generics.RetrieveUpdateAPIView):
-    """GET: 진료 상세조회(환자+vitals+병력 nested) / PATCH: 진료완료 처리"""
+class VisitDepartmentDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """GET/PATCH: 진료팀 상세조회·진료완료 / DELETE: 접수팀의 의사 배정 취소"""
     queryset = VisitDepartment.objects.select_related('visit__patient')
-    permission_classes = [IsClinicalTeam]
+
+    def get_permissions(self):
+        if self.request.method == 'DELETE':
+            return [IsReceptionTeam()]
+        return [IsClinicalTeam()]
 
     def get_serializer_class(self):
         if self.request.method in ('PATCH', 'PUT'):
             return VisitDepartmentDoneSerializer
         return VisitDepartmentDetailSerializer
+
+    def perform_destroy(self, instance):
+        if instance.is_done:
+            raise ValidationError({'detail': '이미 진료가 완료된 배정은 취소할 수 없습니다.'})
+        if instance.prescriptions.exists():
+            raise ValidationError({'detail': '이미 처방이 작성된 배정은 취소할 수 없습니다.'})
+        instance.delete()
 
 
 # 처방관련

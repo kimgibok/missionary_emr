@@ -1,0 +1,403 @@
+/* ---------- 카드 머리, 배지, 안내문 ---------- */
+.card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+}
+
+.card-head .card-title {
+    margin-bottom: 0;
+}
+
+.count-badge {
+    padding: 4px 12px;
+    background: var(--color-bg);
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--color-text-muted);
+}
+
+.section-hint {
+    font-size: 13px;
+    color: var(--color-text-muted);
+    margin-bottom: 14px;
+}
+
+.empty-text {
+    font-size: 14px;
+    color: var(--color-text-muted);
+}
+
+/* ---------- 대기/완료 리스트 ---------- */
+.queue-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.queue-item {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    width: 100%;
+    padding: 12px 14px;
+    background: var(--color-bg);
+    border-radius: 12px;
+    color: var(--color-text);
+    text-align: left;
+    transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.queue-item:hover {
+    background: #F2F2F4;
+}
+
+.queue-item.selected {
+    box-shadow: inset 0 0 0 2px var(--color-accent);
+}
+
+.queue-item-no {
+    min-width: 40px;
+    font-size: 22px;
+    color: var(--color-accent);
+    text-align: center;
+}
+
+.queue-item-main {
+    flex: 1;
+    min-width: 0;
+}
+
+.queue-item-name {
+    font-weight: 600;
+    font-size: 15px;
+}
+
+.queue-item-meta {
+    font-size: 13px;
+    color: var(--color-text-muted);
+}
+
+.queue-item-doctors {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 6px;
+}
+
+/* ---------- 상태 태그 ---------- */
+.doctor-tag {
+    padding: 3px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    background: rgba(58, 125, 92, 0.12);
+    color: var(--color-success);
+}
+
+.doctor-tag.waiting {
+    background: rgba(44, 74, 99, 0.10);
+    color: var(--color-accent);
+}
+
+/* ---------- 접수 카드 상단 ---------- */
+.intake-header {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin-bottom: 20px;
+}
+
+.intake-ticket {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 76px;
+    padding: 8px 14px;
+    border: 1px dashed var(--color-accent);
+    border-radius: 12px;
+}
+
+.intake-ticket-no {
+    font-size: 28px;
+    line-height: 1.1;
+    color: var(--color-accent);
+}
+
+.intake-ticket-label {
+    font-size: 11px;
+    color: var(--color-text-muted);
+}
+
+.intake-patient {
+    flex: 1;
+    min-width: 140px;
+}
+
+.intake-patient-name {
+    font-size: 18px;
+    font-weight: 700;
+}
+
+.intake-patient-meta {
+    font-size: 13px;
+    color: var(--color-text-muted);
+}
+
+.intake-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.btn-secondary.btn-small {
+    flex: none;
+    padding: 8px 14px;
+    font-size: 13px;
+}
+
+.btn-secondary:hover {
+    background: var(--color-bg);
+}
+
+.readonly-notice {
+    padding: 12px 14px;
+    margin-bottom: 16px;
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    font-size: 13px;
+    color: var(--color-text-muted);
+}
+
+/* ---------- 폼 ---------- */
+.form-section-title {
+    margin: 24px 0 12px;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+#intake-form > .form-section-title:first-child {
+    margin-top: 4px;
+}
+
+.form-section-title .hint {
+    margin-left: 6px;
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--color-text-muted);
+}
+
+.form-grid.compact {
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+}
+
+.field-input:disabled {
+    background: var(--color-bg);
+    color: var(--color-text-muted);
+    cursor: not-allowed;
+}
+
+/* ---------- 체크박스를 알약 버튼처럼 ---------- */
+.toggle-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.toggle {
+    position: relative;
+}
+
+.toggle input {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    opacity: 0;
+    cursor: pointer;
+}
+
+.toggle span {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 0 16px;
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+    background: var(--color-surface);
+    font-size: 14px;
+    font-weight: 500;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.toggle input:checked + span {
+    background: var(--color-accent);
+    border-color: var(--color-accent);
+    color: white;
+}
+
+.toggle input:focus-visible + span {
+    box-shadow: 0 0 0 3px rgba(44, 74, 99, 0.25);
+}
+
+.toggle input:disabled {
+    cursor: not-allowed;
+}
+
+.toggle input:disabled + span {
+    opacity: 0.5;
+}
+
+/* ---------- 의사 선택 ---------- */
+.doctor-picker {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 10px;
+    margin-bottom: 18px;
+}
+
+.doctor-option {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-height: 52px;
+    padding: 10px 14px;
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    background: var(--color-surface);
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.doctor-option input {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    opacity: 0;
+    cursor: pointer;
+}
+
+.doctor-option:has(input:checked) {
+    border-color: var(--color-accent);
+    background: rgba(44, 74, 99, 0.06);
+    box-shadow: 0 0 0 1px var(--color-accent);
+}
+
+.doctor-option:has(input:disabled) {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.doctor-option.assigned {
+    background: var(--color-bg);
+    cursor: default;
+}
+
+.doctor-option-name {
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.doctor-option-wait {
+    font-size: 13px;
+    color: var(--color-text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.doctor-cancel {
+    padding: 8px 10px;
+    min-height: 44px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--color-danger);
+}
+
+/* ---------- 토스트 ---------- */
+.toast {
+    position: fixed;
+    left: 50%;
+    bottom: 24px;
+    max-width: calc(100% - 32px);
+    padding: 12px 18px;
+    background: var(--color-text);
+    color: white;
+    border-radius: 12px;
+    font-size: 14px;
+    opacity: 0;
+    pointer-events: none;
+    transform: translate(-50%, 20px);
+    transition: opacity 0.2s ease, transform 0.2s ease;
+    z-index: 200;
+}
+
+.toast.show {
+    opacity: 1;
+    transform: translate(-50%, 0);
+}
+
+.toast.error {
+    background: var(--color-danger);
+}
+
+/* ---------- 좁은 화면 ---------- */
+@media (max-width: 480px) {
+    .intake-actions {
+        width: 100%;
+    }
+
+    .intake-actions .btn-secondary {
+        flex: 1;
+    }
+}
+
+.queue-item-name,
+.queue-item-meta {
+    display: block;
+}
+
+.doctor-tag.unassigned {
+    background: rgba(178, 58, 46, 0.10);
+    color: var(--color-danger);
+}
+
+.doctor-option-side {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* 모달 안의 안내문/에러 (모달 기본 p 스타일보다 우선하도록 구체적으로) */
+.modal-body .modal-note {
+    margin-bottom: 14px;
+}
+
+.modal-body .error-message {
+    color: var(--color-danger);
+    margin: 4px 0 0;
+}
+
+/* 목록 안에서 환자 바로 아래에 펼쳐지는 접수 폼 */
+.intake-panel {
+    background: var(--color-surface);
+    border: 1px solid var(--color-accent);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    padding: 20px;
+    margin: 2px 0 10px;
+}
+
+@media (max-width: 480px) {
+    .intake-panel {
+        padding: 16px;
+    }
+}
