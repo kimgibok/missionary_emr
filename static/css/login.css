@@ -28,13 +28,6 @@
     margin-bottom: 28px;
 }
 
-.error-message {
-    font-size: 13px;
-    color: var(--color-danger);
-    min-height: 18px;
-    margin-bottom: 8px;
-}
-
 .mission-option {
     display: block;
     width: 100%;

@@ -38,6 +38,7 @@ class VisitVitalsSerializer(serializers.ModelSerializer):
             'history_etc', 'chief_complaint', 'symptom_duration',
         ]
         read_only_fields = ['id']
+        extra_kwargs = {'chief_complaint': {'allow_blank': False}}
 
 
 class VisitDepartmentCreateSerializer(serializers.ModelSerializer):
@@ -183,3 +184,35 @@ class PrescriptionDrugUpdateSerializer(serializers.ModelSerializer):
             setattr(instance, attr, value)
         instance.save(skip_recalculate=True)
         return instance
+    
+class VisitAssignmentSerializer(serializers.ModelSerializer):
+    """방문에 배정된 의사 한 명의 요약 (접수 완료 리스트/상세에서 사용)"""
+    doctor_id = serializers.IntegerField(source='user_id', read_only=True)
+    doctor_name = serializers.SerializerMethodField()
+    department_code = serializers.SerializerMethodField()
+
+    class Meta:
+        model = VisitDepartment
+        fields = ['id', 'doctor_id', 'doctor_name', 'department_code', 'is_done']
+
+    def get_doctor_name(self, obj):
+        return obj.user.name or obj.user.username
+
+    def get_department_code(self, obj):
+        return obj.user.primary_department.name if obj.user.primary_department else None
+
+
+class VisitIntakeListSerializer(VisitListSerializer):
+    """접수팀 리스트용 - 배정된 의사 요약 포함"""
+    assignments = VisitAssignmentSerializer(source='visit_departments', many=True, read_only=True)
+
+    class Meta(VisitListSerializer.Meta):
+        fields = VisitListSerializer.Meta.fields + ['assignments']
+
+
+class VisitIntakeDetailSerializer(VisitDetailSerializer):
+    """접수 기록 열람용 - vitals/병력 전체 + 배정된 의사 요약"""
+    assignments = VisitAssignmentSerializer(source='visit_departments', many=True, read_only=True)
+
+    class Meta(VisitDetailSerializer.Meta):
+        fields = VisitDetailSerializer.Meta.fields + ['assignments']
