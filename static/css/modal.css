@@ -58,3 +58,12 @@
 .modal-actions .btn-primary {
     flex: 1;
 }
+
+.modal-box.wide {
+    max-width: 520px;
+}
+
+.intake-trigger {
+    width: auto;
+    margin-bottom: 16px;
+}
