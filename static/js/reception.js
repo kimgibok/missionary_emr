@@ -438,7 +438,7 @@ function scrollToSelected() {
 
 function requestOpenVisit(id) {
     if (currentVisit && currentVisit.id === id) {
-        scrollToSelected();
+        requestCloseIntake();   // 열려 있는 환자를 다시 누르면 닫기
         return;
     }
     if (currentVisit && isDirty && !readOnly) {
@@ -646,8 +646,27 @@ async function savePatientEdit() {
 
 byId('edit-patient-btn').addEventListener('click', openPatientEditModal);
 
+const intakeModalOverlay = byId('intake-modal-overlay');
+
+function openIntakeModal() {
+    byId('search-input').value = '';
+    byId('search-results').innerHTML = '';
+    byId('new-patient-form').reset();
+    intakeModalOverlay.classList.add('open');
+    byId('search-input').focus();
+}
+
+function closeIntakeModal() {
+    intakeModalOverlay.classList.remove('open');
+}
+
+byId('open-intake-modal-btn').addEventListener('click', openIntakeModal);
+byId('intake-modal-close').addEventListener('click', closeIntakeModal);
+
 initPatientIntake({
     onVisitCreated: (visit) => {
+        closeIntakeModal(); 
+
         currentVisit = visit;
         currentVisit.assignments = [];
         pendingDoctorIds = new Set();
