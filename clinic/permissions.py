@@ -45,3 +45,23 @@ IsInfoOrReceptionTeam = role_permission('안내팀', '접수팀')
 IsReceptionOrClinicalTeam = role_permission('접수팀', '진료팀')
 IsInfoOrReceptionOrClinicalTeam = role_permission('안내팀', '접수팀', '진료팀')
 IsClinicalOrPharmacyTeam = role_permission('진료팀', '약국팀')
+
+
+def owns_visit_department(user, visit_department):
+    """그 배정을 받은 의사 본인이면 True. superuser는 항상 True."""
+    return user.is_superuser or visit_department.user_id == user.id
+
+
+class IsPrescriptionOwner(BasePermission):
+    """
+    처방(또는 처방약)을 쓴 의사 본인만 통과. superuser는 항상 통과.
+    처방에는 작성자 필드가 없으므로 '그 처방이 달린 배정의 의사'를 작성자로 본다.
+    역할 확인은 하지 않으니 IsClinicalTeam과 같이 쓴다.
+    새로 만드는 요청(POST)은 대상 객체가 없어 여기서 못 막으므로 뷰의 perform_create에서
+    owns_visit_department()로 확인한다.
+    """
+    message = '본인이 작성한 처방만 수정·삭제할 수 있습니다.'
+
+    def has_object_permission(self, request, view, obj):
+        prescription = getattr(obj, 'prescription', obj)  # 처방약이면 상위 처방으로
+        return owns_visit_department(request.user, prescription.visit_department)

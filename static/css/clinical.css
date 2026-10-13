@@ -55,15 +55,65 @@
     font-size: 12px;
 }
 
+/* ---------- 처방 수정 (편집 모드 카드) ---------- */
+.prescription-card.editing {
+    background: var(--color-surface);
+    border: 1px solid var(--color-accent);
+    box-shadow: var(--shadow);
+}
+
+.prescription-card.editing .rx-cart-item {
+    background: var(--color-bg);
+}
+
+.rx-edit-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    margin-top: 6px;
+}
+
+.rx-edit-actions-right {
+    display: flex;
+    gap: 8px;
+}
+
+.rx-edit-actions .btn-primary.btn-inline {
+    min-width: 88px;
+}
+
+@media (max-width: 480px) {
+    .rx-edit-actions {
+        flex-direction: column-reverse;
+        align-items: stretch;
+    }
+    .rx-edit-actions-right .btn-secondary,
+    .rx-edit-actions-right .btn-primary.btn-inline {
+        flex: 1;
+    }
+}
+
+/* PC: 버튼을 내용 크기로 줄여 오른쪽 정렬 (.btn-primary의 width:100%, .btn-secondary의 flex:1을 덮음) */
 .clinical-footer-actions {
+    justify-content: flex-end;
     margin-top: 20px;
 }
 
+.clinical-footer-actions .btn-secondary,
+.clinical-footer-actions .btn-primary {
+    flex: none;
+    width: auto;
+    padding: 12px 20px;
+}
+
+/* 폰: 세로로 쌓고 전체 폭 (위 규칙과 같은 선택자라 뒤에 와야 이긴다) */
 @media (max-width: 480px) {
     .clinical-footer-actions {
         flex-direction: column;
     }
-    .clinical-footer-actions button {
+    .clinical-footer-actions .btn-secondary,
+    .clinical-footer-actions .btn-primary {
         width: 100%;
     }
 }

@@ -214,17 +214,19 @@ function renderOtherAssignments(a) {
         </span>`).join('');
 }
 
-// ----- 이미 쓴 처방 -----
-function renderPrescriptions(list) {
-    const el = byId('cl-prescriptions');
-    if (list.length === 0) {
-        el.innerHTML = '<p class="empty-text">아직 작성된 처방이 없습니다.</p>';
-        return;
-    }
-    el.innerHTML = list.map((p) => `
-        <div class="prescription-card">
+// ----- 이미 쓴 처방 (조회 + 수정/삭제) -----
+let rxList = [];        // 서버에서 받은 이 배정의 처방 목록
+let editingRx = null;   // 편집 중인 처방 { id, items } - 한 번에 하나만
+
+function rxViewHtml(p) {
+    const side = p.is_dispensed
+        ? '<span class="doctor-tag">수령 완료</span>'
+        : '<button type="button" class="btn-secondary btn-small" data-action="edit-rx">수정</button>';
+    return `
+        <div class="prescription-card" data-rx-id="${p.id}">
             <div class="prescription-card-head">
                 <span class="prescription-card-dept">${escapeHtml(p.department_name)}</span>
+                ${side}
             </div>
             ${p.clinical_note ? `<div class="prescription-card-note">${escapeHtml(p.clinical_note)}</div>` : ''}
             <div class="prescription-card-items">
@@ -232,13 +234,210 @@ function renderPrescriptions(list) {
                     ? '<span class="prescription-drug-chip">처방약 없음</span>'
                     : p.items.map((i) => `<span class="prescription-drug-chip">${escapeHtml(i.drug_name)} × ${i.quantity}</span>`).join('')}
             </div>
-        </div>`).join('');
+        </div>`;
+}
+
+function rxEditHtml(p) {
+    const departmentOptions = departments
+        .map((d) => `<option value="${d.id}"${d.id === p.department ? ' selected' : ''}>${escapeHtml(d.name)}</option>`)
+        .join('');
+    return `
+        <div class="prescription-card editing" data-rx-id="${p.id}">
+            <label class="field-label" for="rx-edit-department">진료과 *</label>
+            <select class="field-input" id="rx-edit-department">${departmentOptions}</select>
+            <label class="field-label" for="rx-edit-note">진료내용</label>
+            <textarea class="field-input" id="rx-edit-note" rows="2" maxlength="2000">${escapeHtml(p.clinical_note)}</textarea>
+            <div class="rx-cart" id="rx-edit-items"></div>
+            <p class="error-message" id="rx-edit-error"></p>
+            <div class="rx-edit-actions">
+                <button type="button" class="rx-cart-remove" data-action="delete-rx">처방 삭제</button>
+                <div class="rx-edit-actions-right">
+                    <button type="button" class="btn-secondary btn-small" data-action="cancel-edit">취소</button>
+                    <button type="button" class="btn-primary btn-inline" data-action="save-edit">저장</button>
+                </div>
+            </div>
+        </div>`;
+}
+
+function renderPrescriptions() {
+    const el = byId('cl-prescriptions');
+    if (rxList.length === 0) {
+        el.innerHTML = '<p class="empty-text">아직 작성된 처방이 없습니다.</p>';
+        return;
+    }
+    el.innerHTML = rxList
+        .map((p) => (editingRx && editingRx.id === p.id ? rxEditHtml(p) : rxViewHtml(p)))
+        .join('');
+    if (editingRx) renderEditItems();
+}
+
+function renderEditItems() {
+    const visible = editingRx.items.filter((x) => !x.removed);
+    byId('rx-edit-items').innerHTML = visible.length === 0
+        ? '<p class="empty-text">처방약 없음 (약 없이 저장됩니다)</p>'
+        : visible.map(cartItemHtml).join('');
 }
 
 async function loadPrescriptions(visitDepartmentId) {
     const data = await apiFetch(`/prescriptions/?visit_department=${visitDepartmentId}`);
-    renderPrescriptions(data.results);
+    rxList = data.results;
+    renderPrescriptions();
 }
+
+// 서버 처방약 → 장바구니와 같은 모양의 편집용 항목
+function toEditItem(i) {
+    const hasSchedule = i.dose_per_intake && i.frequency_per_day && i.duration_days;
+    const item = {
+        key: i.id,
+        id: i.id,
+        drug_id: i.drug,
+        drug_name: i.drug_name,
+        uses_dosage_schedule: i.uses_dosage_schedule,
+        dose_per_intake: i.dose_per_intake ?? '',
+        frequency_per_day: i.frequency_per_day ?? '',
+        duration_days: i.duration_days ?? '',
+        quantity: i.quantity ?? '',
+        manualQty: i.uses_dosage_schedule && !hasSchedule,  // 스케줄 분류인데 수량으로 저장했던 경우
+        removed: false,
+    };
+    item.original = JSON.stringify(buildPrescriptionDrugPayload(item));  // 바뀐 것만 PATCH하려고 비교용
+    return item;
+}
+
+function startEditRx(id) {
+    const p = rxList.find((x) => x.id === id);
+    if (!p) return;
+    editingRx = { id, items: p.items.map(toEditItem) };
+    renderPrescriptions();
+}
+
+function cancelEditRx() {
+    editingRx = null;
+    renderPrescriptions();
+}
+
+async function saveRxEdit() {
+    if (!editingRx || isBusy) return;
+
+    const errorEl = byId('rx-edit-error');
+    errorEl.textContent = '';
+
+    const departmentId = Number(byId('rx-edit-department').value);
+    if (!departmentId) {
+        errorEl.textContent = '진료과를 선택해주세요.';
+        return;
+    }
+    const itemError = validateItems(editingRx.items.filter((x) => !x.removed));
+    if (itemError) {
+        errorEl.textContent = itemError;
+        return;
+    }
+
+    const original = rxList.find((p) => p.id === editingRx.id);
+    const note = byId('rx-edit-note').value.trim();
+
+    isBusy = true;
+    try {
+        // 1) 처방 머리(진료과·진료내용) - 실패하면 약은 건드리지 않고 편집 상태 유지
+        if (departmentId !== original.department || note !== original.clinical_note) {
+            await apiFetch(`/prescriptions/${editingRx.id}/`, {
+                method: 'PATCH',
+                body: JSON.stringify({ department: departmentId, clinical_note: note }),
+            });
+        }
+    } catch (err) {
+        errorEl.textContent = err.message;
+        isBusy = false;
+        return;
+    }
+
+    // 2) 처방약 - 뺀 약은 삭제, 바뀐 약만 수정
+    const failures = [];
+    for (const item of editingRx.items) {
+        try {
+            if (item.removed) {
+                await apiFetch(`/prescription-drugs/${item.id}/clinical/`, { method: 'DELETE' });
+                continue;
+            }
+            const payload = buildPrescriptionDrugPayload(item);
+            if (JSON.stringify(payload) !== item.original) {
+                await apiFetch(`/prescription-drugs/${item.id}/clinical/`, {
+                    method: 'PATCH',
+                    body: JSON.stringify(payload),
+                });
+            }
+        } catch (err) {
+            failures.push(`${item.drug_name}(${err.message})`);
+        }
+    }
+    isBusy = false;
+
+    editingRx = null;
+    if (failures.length > 0) {
+        showToast(`일부 약 수정에 실패했습니다: ${failures.join(', ')}`, true);
+    } else {
+        isDirty = false;
+        showToast('처방을 수정했습니다.');
+    }
+    await loadPrescriptions(currentAssignment.id);
+}
+
+function confirmDeleteRx() {
+    if (!editingRx) return;
+    const rxId = editingRx.id;
+    openModal({
+        title: '처방 삭제',
+        bodyHtml: '<p>이 처방과 처방약을 모두 삭제합니다. 되돌릴 수 없어요.</p>',
+        confirmLabel: '삭제하기',
+        onConfirm: () => { deleteRx(rxId); },
+    });
+}
+
+async function deleteRx(rxId) {
+    if (isBusy) return;
+    isBusy = true;
+    try {
+        await apiFetch(`/prescriptions/${rxId}/`, { method: 'DELETE' });
+        editingRx = null;
+        isDirty = false;
+        showToast('처방을 삭제했습니다.');
+        await loadPrescriptions(currentAssignment.id);
+    } catch (err) {
+        showToast(err.message, true);
+    } finally {
+        isBusy = false;
+    }
+}
+
+byId('cl-prescriptions').addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-action]');
+    if (!btn) return;
+    const action = btn.dataset.action;
+
+    if (action === 'edit-rx') {
+        startEditRx(Number(btn.closest('.prescription-card').dataset.rxId));
+        return;
+    }
+    if (!editingRx) return;
+
+    if (action === 'cancel-edit') cancelEditRx();
+    else if (action === 'save-edit') saveRxEdit();
+    else if (action === 'delete-rx') confirmDeleteRx();
+    else if (action === 'remove' || action === 'toggle-manual') {
+        const item = findCartItem(editingRx.items, btn);
+        if (!item) return;
+        if (action === 'remove') item.removed = true;
+        else item.manualQty = !item.manualQty;
+        isDirty = true;
+        renderEditItems();
+    }
+});
+
+byId('cl-prescriptions').addEventListener('input', (e) => {
+    if (!editingRx) return;
+    isDirty = true;
+    applyCartInput(editingRx.items, e);
+});
 
 // ----- 열기/닫기 -----
 async function openAssignment(id) {
@@ -254,6 +453,7 @@ async function openAssignment(id) {
         renderAssignList();
         scrollToSelected();
         resetRxForm();
+        editingRx = null;
         await loadPrescriptions(id);
     } catch (err) {
         showToast(err.message, true);
@@ -284,6 +484,7 @@ function requestOpenAssignment(id) {
 
 function resetPanel() {
     currentAssignment = null;
+    editingRx = null;
     isDirty = false;
     clinicalPanel.hidden = true;
     byId('cl-vitals-error').textContent = '';
@@ -525,6 +726,7 @@ function addToCart(d) {
         return;
     }
     rxCart.push({
+        key: d.drug_id,
         drug_id: d.drug_id,
         drug_name: d.drug_name,
         uses_dosage_schedule: d.uses_dosage_schedule,
@@ -568,31 +770,45 @@ function cartFieldsHtml(item) {
         ${toggleBtn}`;
 }
 
-function renderCart() {
-    const el = byId('rx-cart');
-    if (rxCart.length === 0) {
-        el.innerHTML = '';
-        return;
-    }
-    el.innerHTML = rxCart.map((item) => `
-        <div class="rx-cart-item" data-drug-id="${item.drug_id}">
+// 약 카드 한 장 - 새 처방 장바구니와 처방 수정 화면이 같이 쓴다 (item.key로 구분)
+function cartItemHtml(item) {
+    const stock = item.remaining_qty !== undefined
+        ? `<div class="rx-cart-item-stock">현장 잔량 ${item.remaining_qty}</div>`
+        : '';
+    return `
+        <div class="rx-cart-item" data-key="${item.key}">
             <div class="rx-cart-item-head">
                 <span class="rx-cart-item-name">${escapeHtml(item.drug_name)}</span>
                 <button type="button" class="rx-cart-remove" data-action="remove">빼기</button>
             </div>
-            <div class="rx-cart-item-stock">현장 잔량 ${item.remaining_qty}</div>
+            ${stock}
             ${cartFieldsHtml(item)}
-        </div>`).join('');
+        </div>`;
+}
+
+function findCartItem(items, el) {
+    const card = el.closest('.rx-cart-item');
+    return card ? items.find((x) => String(x.key) === card.dataset.key) : null;
+}
+
+// 1회량/횟수/일수/수량 입력값을 항목에 반영
+function applyCartInput(items, e) {
+    const field = e.target.dataset.field;
+    if (!field) return;
+    const item = findCartItem(items, e.target);
+    if (item) item[field] = e.target.value;
+}
+
+function renderCart() {
+    byId('rx-cart').innerHTML = rxCart.map(cartItemHtml).join('');
 }
 
 byId('rx-cart').addEventListener('click', (e) => {
-    const card = e.target.closest('.rx-cart-item');
-    if (!card) return;
-    const drugId = Number(card.dataset.drugId);
-    const item = rxCart.find((x) => x.drug_id === drugId);
+    const item = findCartItem(rxCart, e.target);
+    if (!item) return;
 
     if (e.target.dataset.action === 'remove') {
-        removeFromCart(drugId);
+        removeFromCart(item.drug_id);
     } else if (e.target.dataset.action === 'toggle-manual') {
         item.manualQty = !item.manualQty;
         renderCart();
@@ -600,11 +816,7 @@ byId('rx-cart').addEventListener('click', (e) => {
 });
 
 byId('rx-cart').addEventListener('input', (e) => {
-    const field = e.target.dataset.field;
-    if (!field) return;
-    const card = e.target.closest('.rx-cart-item');
-    const item = rxCart.find((x) => x.drug_id === Number(card.dataset.drugId));
-    item[field] = e.target.value;
+    applyCartInput(rxCart, e);
     isDirty = true;
 });
 
@@ -618,14 +830,18 @@ function buildPrescriptionDrugPayload(item) {
             duration_days: item.duration_days === '' ? null : parseInt(item.duration_days, 10),
         };
     }
+    // 수량 직접 입력: 세 값을 null로 같이 보내야 서버 save()가 수량을 다시 계산하지 않는다 (수정 시 중요)
     return {
         drug: item.drug_id,
+        dose_per_intake: null,
+        frequency_per_day: null,
+        duration_days: null,
         quantity: item.quantity === '' ? 0 : parseInt(item.quantity, 10),
     };
 }
 
-function validateCart() {
-    for (const item of rxCart) {
+function validateItems(items) {
+    for (const item of items) {
         const useSchedule = item.uses_dosage_schedule && !item.manualQty;
         if (useSchedule) {
             if (!item.dose_per_intake || !item.frequency_per_day || !item.duration_days) {
@@ -650,7 +866,7 @@ byId('rx-save-btn').addEventListener('click', async () => {
         return;
     }
 
-    const cartError = validateCart();
+    const cartError = validateItems(rxCart);
     if (cartError) {
         errorEl.textContent = cartError;
         return;

@@ -132,7 +132,9 @@ class DoctorWaitCountsView(APIView):
     
 
 # 의사 배정
-from .permissions import IsClinicalTeam, IsReceptionOrClinicalTeam, IsInfoOrReceptionOrClinicalTeam
+from rest_framework.exceptions import PermissionDenied
+
+from .permissions import IsClinicalTeam, IsReceptionOrClinicalTeam, IsInfoOrReceptionOrClinicalTeam, IsPrescriptionOwner, owns_visit_department
 from .serializers import (
     VisitDepartmentListSerializer, VisitDepartmentDetailSerializer, VisitDepartmentDoneSerializer, VisitDepartmentCreateSerializer,
 )
@@ -203,6 +205,7 @@ class VisitDepartmentDetailView(generics.RetrieveUpdateDestroyAPIView):
 from .models import Prescription, PrescriptionDrug, MissionStock
 from .serializers import (
     PrescriptionCreateSerializer, PrescriptionDrugCreateSerializer, DrugSearchSerializer,
+    PrescriptionUpdateSerializer,
 )
 
 
@@ -221,13 +224,46 @@ class PrescriptionListCreateView(generics.ListCreateAPIView):
             return Prescription.objects.none()
         return Prescription.objects.filter(
             visit_department_id=visit_department_id
-        ).select_related('department').prefetch_related('items__drug')
+        ).select_related('department').prefetch_related('items__drug__cat1')
+
+    def perform_create(self, serializer):
+        if not owns_visit_department(self.request.user, serializer.validated_data['visit_department']):
+            raise PermissionDenied('본인에게 배정된 환자에게만 처방을 작성할 수 있습니다.')
+        serializer.save()
+
+
+def check_not_dispensed(prescription):
+    """약국에서 이미 수령 처리된 처방은 진료팀이 고칠 수 없다"""
+    if prescription.is_dispensed:
+        raise ValidationError({'detail': '약국에서 이미 수령 처리된 처방은 수정할 수 없습니다.'})
+
+
+class PrescriptionDetailView(generics.UpdateAPIView, generics.DestroyAPIView):
+    """진료팀 - 처방의 진료과·진료내용 수정 / 처방 통째로 삭제(처방약도 같이 삭제됨)"""
+    queryset = Prescription.objects.select_related('visit_department')
+    serializer_class = PrescriptionUpdateSerializer
+    permission_classes = [IsClinicalTeam, IsPrescriptionOwner]
+
+    def perform_update(self, serializer):
+        check_not_dispensed(serializer.instance)
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        check_not_dispensed(instance)
+        instance.delete()
 
 
 class PrescriptionDrugCreateView(generics.CreateAPIView):
     queryset = PrescriptionDrug.objects.all()
     serializer_class = PrescriptionDrugCreateSerializer
     permission_classes = [IsClinicalTeam]
+
+    def perform_create(self, serializer):
+        prescription = serializer.validated_data['prescription']
+        if not owns_visit_department(self.request.user, prescription.visit_department):
+            raise PermissionDenied('본인이 작성한 처방에만 약을 추가할 수 있습니다.')
+        check_not_dispensed(prescription)
+        serializer.save()
 
 
 class DrugSearchView(generics.ListAPIView):
@@ -401,9 +437,17 @@ class PrescriptionDrugUpdateView(generics.UpdateAPIView):
     
 class PrescriptionDrugClinicalUpdateView(generics.UpdateAPIView, generics.DestroyAPIView):
     """진료팀 - 처방약 내용 수정(재계산됨), 삭제"""
-    queryset = PrescriptionDrug.objects.all()
+    queryset = PrescriptionDrug.objects.select_related('prescription__visit_department')
     serializer_class = PrescriptionDrugClinicalUpdateSerializer
-    permission_classes = [IsClinicalTeam]
+    permission_classes = [IsClinicalTeam, IsPrescriptionOwner]
+
+    def perform_update(self, serializer):
+        check_not_dispensed(serializer.instance.prescription)
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        check_not_dispensed(instance.prescription)
+        instance.delete()
     
     
 # 진료팀

@@ -229,15 +229,37 @@ class DepartmentSerializer(serializers.ModelSerializer):
         fields = ['id', 'name']
 
 
+class PrescriptionDrugClinicalItemSerializer(serializers.ModelSerializer):
+    """진료팀 처방 목록의 약 항목 - 수정 폼을 채우려고 복용스케줄까지 포함"""
+    drug_name = serializers.CharField(source='drug.name', read_only=True)
+    uses_dosage_schedule = serializers.BooleanField(source='drug.cat1.uses_dosage_schedule', read_only=True)
+
+    class Meta:
+        model = PrescriptionDrug
+        fields = [
+            'id', 'drug', 'drug_name', 'uses_dosage_schedule',
+            'dose_per_intake', 'frequency_per_day', 'duration_days', 'quantity',
+        ]
+
+
 class PrescriptionListSerializer(serializers.ModelSerializer):
-    """진료팀 - 같은 배정 건에 이미 쓴 처방 목록 (중복 처방 확인용)"""
+    """진료팀 - 같은 배정 건에 이미 쓴 처방 목록 (중복 처방 확인 + 수정용)"""
     department_name = serializers.CharField(source='department.name', read_only=True)
-    items = PrescriptionDrugItemSerializer(many=True, read_only=True)
+    items = PrescriptionDrugClinicalItemSerializer(many=True, read_only=True)
 
     class Meta:
         model = Prescription
-        fields = ['id', 'department', 'department_name', 'clinical_note', 'items']
-        
+        fields = ['id', 'department', 'department_name', 'clinical_note', 'is_dispensed', 'items']
+
+
+class PrescriptionUpdateSerializer(serializers.ModelSerializer):
+    """진료팀 - 처방의 진료과·진료내용 수정"""
+    class Meta:
+        model = Prescription
+        fields = ['id', 'department', 'clinical_note']
+        read_only_fields = ['id']
+
+
 class PrescriptionDrugClinicalUpdateSerializer(serializers.ModelSerializer):
     """진료팀 - 처방약 수정 (약/수량/복용스케줄 전부 변경 가능)"""
     class Meta:
