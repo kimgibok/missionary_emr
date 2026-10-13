@@ -1,0 +1,136 @@
+.other-assignments {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 20px;
+}
+
+.other-assignments:empty {
+    display: none;
+}
+
+.prescription-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+.prescription-card {
+    padding: 14px;
+    background: var(--color-bg);
+    border-radius: 12px;
+}
+
+.prescription-card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+}
+
+.prescription-card-dept {
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.prescription-card-note {
+    font-size: 13px;
+    color: var(--color-text-muted);
+    white-space: pre-line;
+    margin-bottom: 8px;
+}
+
+.prescription-card-items {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.prescription-drug-chip {
+    padding: 3px 10px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+    font-size: 12px;
+}
+
+.clinical-footer-actions {
+    margin-top: 20px;
+}
+
+@media (max-width: 480px) {
+    .clinical-footer-actions {
+        flex-direction: column;
+    }
+    .clinical-footer-actions button {
+        width: 100%;
+    }
+}
+
+.field-grid-2 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 14px;
+    margin-bottom: 14px;
+}
+
+textarea.field-input {
+    resize: vertical;
+    min-height: 44px;
+}
+
+.rx-cart {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin: 14px 0;
+}
+
+.rx-cart-item {
+    padding: 12px 14px;
+    background: var(--color-bg);
+    border-radius: 12px;
+}
+
+.rx-cart-item-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.rx-cart-item-name {
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.rx-cart-item-stock {
+    font-size: 12px;
+    color: var(--color-text-muted);
+}
+
+.rx-cart-remove {
+    font-size: 13px;
+    color: var(--color-danger);
+    padding: 6px 8px;
+}
+
+.rx-cart-fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+    gap: 10px;
+}
+
+.rx-cart-fields .field-input {
+    margin-bottom: 0;
+    padding: 8px 10px;
+    font-size: 14px;
+}
+
+.rx-cart-fields label {
+    display: block;
+    font-size: 12px;
+    color: var(--color-text-muted);
+    margin-bottom: 4px;
+}
