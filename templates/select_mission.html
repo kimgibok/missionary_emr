@@ -1,12 +1,12 @@
-{% load static %}
+{% load static_version %}
 <!DOCTYPE html>
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>미션 선택 · 의료선교 EMR</title>
-    <link rel="stylesheet" href="{% static 'css/base.css' %}">
-    <link rel="stylesheet" href="{% static 'css/login.css' %}">
+    <link rel="stylesheet" href="{% static_v 'css/base.css' %}">
+    <link rel="stylesheet" href="{% static_v 'css/login.css' %}">
 </head>
 <body>
     <div class="login-wrap">
@@ -17,7 +17,7 @@
         </div>
     </div>
 
-    <script src="{% static 'js/api.js' %}"></script>
-    <script src="{% static 'js/select_mission.js' %}"></script>
+    <script src="{% static_v 'js/api.js' %}"></script>
+    <script src="{% static_v 'js/select_mission.js' %}"></script>
 </body>
 </html>

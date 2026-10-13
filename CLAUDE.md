@@ -45,6 +45,7 @@ missionary_emr/
 │   ├─ models.py            모든 도메인 모델
 │   ├─ permissions.py       role_permission() 팩토리, get_active_memberships(), 본인 배정·처방 확인용 클래스/함수
 │   ├─ pagination.py        FlexiblePagination (기본 20, ?page_size= 최대 500)
+│   ├─ templatetags/static_version.py   {% static_v %} - 정적 파일 주소에 ?v=수정시각 (캐시 자동 갱신)
 │   ├─ serializers.py / views.py / urls.py / admin.py
 ├─ management/              관리자 전용 API (모델 없음, clinic 모델을 import해서 사용)
 │   ├─ permissions.py       IsSuperUser (is_superuser 기준, DRF IsAdminUser 아님)
@@ -170,6 +171,7 @@ POST처럼 대상 객체가 없는 요청은 뷰의 `perform_create`에서 `owns
 - `hidden` 속성이 `display:flex` 클래스에 덮이지 않도록 `base.css`에 `[hidden] { display: none !important; }`가 있다. 지우지 않는다.
 - 같은 specificity에서는 나중에 정의된 규칙이 이긴다. `.btn-primary`(width:100%)와 `.btn-inline`이 충돌했던 전례가 있어 `.btn-primary.btn-inline`처럼 더 구체적인 선택자를 쓴다.
 - `<script>` 순서: 함수를 정의하는 파일이 호출하는 파일보다 **먼저**. 예: `api.js` → `common.js` → `patient-intake.js` → `nav.js` → `modal.js` → 페이지 js.
+- 템플릿에서 CSS·JS는 `{% load static_version %}` + `{% static_v 'js/x.js' %}`로 불러온다(`{% static %}` 대신). 파일이 바뀌면 주소의 `?v=`가 바뀌어 모든 기기가 새 파일을 받는다. 새 페이지를 만들 때도 지킨다.
 - 인라인 `style="..."`을 JS 문자열에 넣지 않고 css 클래스를 만든다(예: `.rx-cart-toggle`, `.empty-text.is-error`).
 
 ## 8. 작업 방식 (Claude에게)
@@ -230,7 +232,8 @@ POST처럼 대상 객체가 없는 요청은 뷰의 `perform_create`에서 `owns
 - `POST /visits/` 응답에는 `assignments`가 없다. 방문을 만든 직후 그 응답을 접수 화면 상태에 넣을 때 `assignments = []`를 직접 채워야 한다.
 - 접수 폼 맥박(`pr`)은 선택이다. "접수 대기" 판단에 `pr`을 쓰지 않는다(주호소 기준).
 - `runserver` 자동 재시작은 여러 .py 파일을 연달아 고치면 일부 변경을 놓칠 수 있다. 백엔드를 고쳤는데 API 응답이 그대로면 `runserver`를 직접 껐다 켠다(`manage.py shell`은 디스크 코드를 새로 읽어서 정상으로 보이니 헷갈리기 쉽다).
-- 브라우저가 옛 JS/CSS를 캐시한다. 수정이 안 먹힌 것처럼 보이면 `Ctrl+Shift+R`로 하드 리프레시한다. 계정을 바꿔 테스트할 때는 로그아웃 후 재로그인한다(`localStorage`에 이름·권한이 남는다).
+- 브라우저 캐시: `{% static_v %}` 덕분에 고친 JS·CSS는 일반 새로고침으로 새로 받는다. 이미 열려 있던 화면은 새로고침 전까지 예전 파일을 쓴다. 그래도 안 먹힌 것처럼 보이면 `Ctrl+Shift+R`.
+  (페이지 js끼리 `const` 이름이 겹치면 SyntaxError로 페이지 전체가 멈추니, 옛 파일과 새 파일이 섞인 것처럼 보이면 먼저 새로고침해 본다.) 계정을 바꿔 테스트할 때는 로그아웃 후 재로그인한다(`localStorage`에 이름·권한이 남는다).
 - Windows cmd에서 curl로 한글 파라미터를 보낼 때는 `curl -G <URL> --data-urlencode "search=한글"`을 쓴다. 헤더는 `Authorization: Token <키>`(`Token` 단어와 공백 필수).
 - 개발용 설정이 남아 있다: `ALLOWED_HOSTS = ['*']`, `DEBUG = True`. 현장 배포 전에 허용 IP를 좁히고 `SECRET_KEY`를 점검한다.
 - SQLite 한 파일에 여러 기기가 동시에 쓴다. 번호 발급·재고 차감처럼 겹치기 쉬운 곳은 트랜잭션과 `select_for_update()`를 지키고, 현장 투입 전에 동시 접속 부하를 확인한다.
