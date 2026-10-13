@@ -43,7 +43,7 @@ missionary_emr/
 │   ├─ serializers.py / views.py / urls.py / admin.py
 ├─ clinic/                  현장 4팀(안내·접수·진료·약국)의 모델과 API
 │   ├─ models.py            모든 도메인 모델
-│   ├─ permissions.py       role_permission() 팩토리, get_active_memberships()
+│   ├─ permissions.py       role_permission() 팩토리, get_active_memberships(), 본인 배정·처방 확인용 클래스/함수
 │   ├─ pagination.py        FlexiblePagination (기본 20, ?page_size= 최대 500)
 │   ├─ serializers.py / views.py / urls.py / admin.py
 ├─ management/              관리자 전용 API (모델 없음, clinic 모델을 import해서 사용)
@@ -55,7 +55,8 @@ missionary_emr/
 │   └─ partials/            nav.html, modal.html, patient_intake_modal.html
 ├─ static/
 │   ├─ css/                 base.css(토큰·공통 컴포넌트), login, nav, page, modal, info, reception, clinical
-│   ├─ js/                  api.js, nav.js, modal.js, login.js, select_mission.js,
+│   ├─ js/                  api.js, common.js(escapeHtml·showToast·patientMeta·doctorLabel·byId),
+│   │                       nav.js, modal.js, login.js, select_mission.js,
 │   │                       patient-intake.js, info.js, reception.js, clinical.js
 │   └─ fonts/               Pretendard-{Regular,Medium,SemiBold,Bold}.woff2
 └─ db/emr.db                (gitignore)
@@ -73,7 +74,7 @@ superuser는 백엔드 권한을 전부 통과하므로 nav에서 모든 역할 
 |---|---|
 | 안내팀 `/info/` | 환자 검색(이번 미션 내) / 신규 등록 / 방문 등록(등록번호 자동 발급, 체중은 선택) / 의사별 대기 인원 확인(번호표 줄 때 참고) |
 | 접수팀 `/reception/` | 접수 대기(등록번호 오름차순) / 오늘 접수 완료(등록번호 내림차순, 다시 열어 수정 가능) / 활력징후·병력·주호소 입력 / 의사 배정(다중, 진료 전이면 취소 가능) / 환자정보 수정 / 환자 검색·신규 등록(버튼 → 모달) |
-| 진료팀 `/clinical/` | 내 배정 목록(오늘만, 미완료 먼저, 등록번호순) / 진료 상세(환자·vitals·병력 수정, 다른 의사 배정 현황 표시) / 처방 작성(진료과 확정, 약 검색·장바구니) / 전과(다른 의사 추가 배정) / 진료 완료 |
+| 진료팀 `/clinical/` | 진료 대기(오늘, 등록번호순) / 오늘 진료 완료(완료 시각 최신순) / 진료 상세(환자·vitals·병력 수정, 다른 의사 배정 현황) / 다른 의사 처방 보기(진료 완료분, 중복 처방 확인용) / 처방 작성(진료과 확정, 약 검색·장바구니)·수정·삭제 / 전과(다른 의사 추가 배정, 내가 한 배정은 진료 전이면 취소) / 진료 완료(처방 1건 이상 필요) · 완료 취소(약국 수령 전까지) |
 | 약국팀 `/pharmacy/` | 환자 단위 처방 대기 / 처방약마다 배치(MissionStock) 선택해 조제·재고 차감 / 재고 조회 / 일별 약품 사용 통계 / 처방약 수량 수정 |
 | 관리자 `/manage/` | 미션 탭별 통계(소아/성인 × 성별 × 진료과) / 약품·카테고리·창고배치·미션재고 CRUD / 미션 재고 정산 / 엑셀 export. 미션 생성은 Django admin에서 한다 |
 
@@ -92,7 +93,8 @@ superuser는 백엔드 권한을 전부 통과하므로 nav에서 모든 역할 
   `DrugCategory1.uses_dosage_schedule`가 True인 분류만 처방 시 1회량/1일횟수/일수 방식으로 입력한다.
 - `Patient`: name_kr, name_local, sex(M/F), `birth_year`. 나이는 `방문연도 − birth_year`로 계산한다. **소아 = 19세 이하, 성인 = 20세 이상.**
 - `Visit`: `unique_together=(mission, visit_date, reg_no)`. 등록번호는 미션+날짜 안에서만 유일하고 날짜마다 1부터 시작한다. 체중·vitals·병력 체크박스·주호소를 가진다.
-- `VisitDepartment`: **의사 배정 기록**이다(visit, user=의사, assigned_at, is_done). department 필드가 없다 — 의사 전공과 실제 담당 과가 다를 수 있기 때문이다.
+- `VisitDepartment`: **의사 배정 기록**이다(visit, user=의사, assigned_by=배정한 사람, assigned_at, is_done, done_at). department 필드가 없다 — 의사 전공과 실제 담당 과가 다를 수 있기 때문이다.
+  `assigned_by`는 POST 시 서버가 요청자로 채운다(진료팀 배정 취소 권한 판단용, 0006 이전 기록은 비어 있음). `done_at`은 완료 시 지금 시각, 완료 취소 시 비움(완료 목록 정렬용).
 - `Prescription`: department는 **여기서 확정**된다(visit_department, department, clinical_note, is_dispensed). 한 배정에 처방이 여러 건일 수 있고, 약 없이 처방만 있어도 유효하다(기도만 하는 경우도 약국으로 보낸다).
 - `PrescriptionDrug`: dose_per_intake × frequency_per_day × duration_days로 `quantity`를 `save()`에서 자동 계산한다. 세 값이 없으면 quantity를 직접 입력한 값 그대로 쓴다.
 - `DrugBatch`는 창고 전체 재고(미션과 무관, source = 후원/현지/구매/현지구매/기타 + source_detail), `MissionStock`은 미션에 챙겨간 몫이다. **처방 시 재고 차감은 `MissionStock.remaining_qty`에서** 일어난다.
@@ -101,7 +103,14 @@ superuser는 백엔드 권한을 전부 통과하므로 nav에서 모든 역할 
 **주요 업무 규칙**
 - "접수 대기" = 오늘 방문 중 `chief_complaint=''`, "접수 완료" = 주호소가 입력된 방문.
 - 접수 기록은 배정된 모든 진료가 끝나면 읽기 전용이다(현재는 프론트에서만 막는다).
-- 의사 배정 취소는 그 배정의 `is_done=False`이고 처방이 없을 때만 가능하다.
+- 의사 배정 취소는 그 배정의 `is_done=False`이고 처방이 없을 때만 가능하다. 접수팀은 모든 배정, 진료팀은 **본인이 한 배정(`assigned_by`)만** 취소한다.
+- 같은 방문에 같은 의사를 두 번 배정할 수 없다(서버 400).
+- 진료팀은 **본인 배정만** 조회·처리하고, 처방 작성·수정·삭제도 본인 배정의 처방만 한다(superuser는 전부).
+- 전과(진료팀의 추가 배정)는 그 환자에게 **본인의 미완료 배정**이 있을 때만 된다. 전과해도 내 배정은 자동 완료되지 않는다.
+- 진료 완료는 처방이 **1건 이상** 있어야 한다(약이 없으면 '처방약 없이' 처방을 저장). 처방이 없으면 약국 대기에 안 나타나기 때문이다.
+- 완료된 배정의 처방은 서버에서도 작성·수정·삭제를 막는다. 고치려면 [완료 취소] → 수정. 완료 취소는 약국 수령(`is_dispensed`) 전까지만 된다.
+  vitals는 다른 의사가 아직 진료 중일 수 있어 완료 후에도 서버는 막지 않고 화면에서만 잠근다.
+- 같은 환자를 본 다른 의사의 처방은 **진료 완료된 것만** 읽기 전용으로 보여준다(한 환자를 동시에 진료할 일은 없다).
 - 약국 대기 목록은 **환자(visit) 단위**다. 배정된 모든 `VisitDepartment`가 완료되고 미수령 처방이 있는 방문만 나오며, 수령 처리는 그 환자의 모든 처방을 한 번에 `is_dispensed=True`로 만든다.
 - 조제할 때 같은 약의 배치가 여러 개면 약국팀이 직접 고른다(자동 FIFO 아님).
 - 의사별 대기 인원(`wait-counts`)은 이번 미션의 진료팀 멤버 전원을 보여주고(대기 0명 포함), **오늘 날짜** 미완료 배정만 센다.
@@ -116,8 +125,8 @@ superuser는 백엔드 권한을 전부 통과하므로 nav에서 모든 역할 
 | 인증 | `POST auth/login/`, `POST auth/logout/` |
 | 환자 | `GET/POST patients/` (`?search=&scope=current_mission`), `GET/PATCH patients/<pk>/` |
 | 방문 | `GET/POST visits/` (`?status=waiting_vitals\|intake_done`), `GET/PATCH visits/<pk>/` |
-| 배정 | `GET/POST visit-departments/`, `GET visit-departments/wait-counts/`, `GET/PATCH/DELETE visit-departments/<pk>/` |
-| 처방 | `GET/POST prescriptions/` (`?visit_department=`), `POST prescription-drugs/` |
+| 배정 | `GET/POST visit-departments/` (`?is_done=false\|true`), `GET visit-departments/wait-counts/`(안내·접수·진료팀), `GET/PATCH/DELETE visit-departments/<pk>/` (PATCH `{is_done: true\|false}` = 진료 완료/완료 취소) |
+| 처방 | `GET/POST prescriptions/` (`?visit_department=` 내 처방, `?visit=` 다른 의사 완료 처방), `PATCH/DELETE prescriptions/<pk>/` (진료과·진료내용 수정 / 처방 삭제), `POST prescription-drugs/` |
 | 처방약 수정 | `PATCH prescription-drugs/<pk>/` = 약국팀용(수량만 믿고 재계산 안 함), `PATCH/DELETE prescription-drugs/<pk>/clinical/` = 진료팀용(재계산됨) |
 | 조회용 | `GET departments/`, `drug-categories1/`, `drug-categories2/`, `drugs/` (진료팀 약 검색, MissionStock 기준, `?search=&cat1=&cat2=`) |
 | 약국 | `GET mission-stocks/`, `GET prescription-drugs/daily-stats/?date=`, `GET visits/pharmacy-queue/`, `GET visits/<id>/dispense-options/`, `POST visits/<id>/dispense/` |
@@ -125,6 +134,8 @@ superuser는 백엔드 권한을 전부 통과하므로 nav에서 모든 역할 
 
 권한 클래스(`clinic/permissions.py`): `IsInfoTeam`, `IsReceptionTeam`, `IsClinicalTeam`, `IsPharmacyTeam`와 조합용(`IsInfoOrReceptionTeam` 등).
 모두 `role_permission(*역할이름)` 팩토리로 만들며, **superuser는 항상 통과**한다. 역할 이름 문자열('안내팀', '접수팀', '진료팀', '약국팀')은 DB의 `Role.name`과 정확히 같아야 한다.
+객체 단위 확인(역할 클래스와 함께 씀): `IsAssignedDoctor`(본인 배정), `IsPrescriptionOwner`(본인 처방·처방약), `CanCancelAssignment`(배정 취소).
+POST처럼 대상 객체가 없는 요청은 뷰의 `perform_create`에서 `owns_visit_department()`, `can_add_assignment()`, `is_assigned_to_visit()`로 확인한다.
 
 "현재 미션" 판단은 `get_current_mission(user)`다. 오늘 날짜가 start~end 사이인 멤버십 중 **첫 번째**를 쓴다.
 `mission_id`를 요청마다 넘기지 않고 서버가 스코프를 정한다. 관리자 통계·export만 `?mission=`을 받는다.
@@ -150,6 +161,7 @@ superuser는 백엔드 권한을 전부 통과하므로 nav에서 모든 역할 
 **프론트엔드**
 - API 호출은 반드시 `static/js/api.js`의 `apiFetch()`를 거친다(토큰 부착, 401이면 로그인 화면으로, 오류 메시지 가공).
 - 사람이 입력한 문자열을 `innerHTML`에 넣을 때는 `escapeHtml()`을 거친다.
+- 여러 페이지가 쓰는 화면 도우미(`escapeHtml`, `showToast`, `patientMeta`, `doctorLabel`, `byId`)는 `common.js`에만 둔다. 페이지 js에 다시 정의하지 않는다 — 일반 `<script>`끼리는 `const`·`let` 이름을 공유해서, `const byId`가 두 번 있으면 페이지 전체가 멈춘다.
 - 디자인 토큰(색·반경·그림자)은 `base.css`의 `:root` 변수만 쓴다. 공통 컴포넌트(`.card`, `.field-input`, `.btn-primary`, `.toggle`, `.queue-item` 등)는 `base.css` 또는 공용 css에서 재사용하고 페이지마다 복제하지 않는다.
 - 디자인 톤: **애플 스타일** — 여백 넉넉, 은은한 그림자, 둥근 모서리, 깔끔한 타이포. 등록번호만 점선 테두리 + `tabular-nums`로 "번호표" 느낌을 낸다. 못생기게 만들지 않는다.
 - 확인·입력용 팝업은 브라우저 기본 `alert/prompt/confirm` 대신 `openModal()` / `closeModal()`과 `showToast()`를 쓴다.
@@ -157,7 +169,8 @@ superuser는 백엔드 권한을 전부 통과하므로 nav에서 모든 역할 
 - 목록 안에 펼쳐지는 패널(접수/진료)은 `#panel-dock`을 "집"으로 둔다. 목록을 `innerHTML`로 다시 그리기 전에 패널을 dock으로 옮겨 두지 않으면 패널이 사라진다.
 - `hidden` 속성이 `display:flex` 클래스에 덮이지 않도록 `base.css`에 `[hidden] { display: none !important; }`가 있다. 지우지 않는다.
 - 같은 specificity에서는 나중에 정의된 규칙이 이긴다. `.btn-primary`(width:100%)와 `.btn-inline`이 충돌했던 전례가 있어 `.btn-primary.btn-inline`처럼 더 구체적인 선택자를 쓴다.
-- `<script>` 순서: 함수를 정의하는 파일이 호출하는 파일보다 **먼저**. 예: `api.js` → `patient-intake.js` → `nav.js` → `modal.js` → 페이지 js.
+- `<script>` 순서: 함수를 정의하는 파일이 호출하는 파일보다 **먼저**. 예: `api.js` → `common.js` → `patient-intake.js` → `nav.js` → `modal.js` → 페이지 js.
+- 인라인 `style="..."`을 JS 문자열에 넣지 않고 css 클래스를 만든다(예: `.rx-cart-toggle`, `.empty-text.is-error`).
 
 ## 8. 작업 방식 (Claude에게)
 
@@ -174,22 +187,25 @@ superuser는 백엔드 권한을 전부 통과하므로 nav에서 모든 역할 
 - 안내·접수·진료·약국 4팀 API 전체, 역할 권한 클래스
 - `management` 앱: 약품·카테고리·창고배치·미션재고 CRUD, 미션 탭 목록, 환자 통계, 미션 재고 정산, 엑셀 export(cat1별 시트)
 - 페이지네이션 `page_size`, 의사 전문과 표시(`department_code`), 배정 취소, 접수 대기 기준 = 주호소
+- 진료팀: 처방 수정·삭제, 전과·배정 취소(`assigned_by`), 진료 완료·완료 취소(`done_at`), 다른 의사 완료 처방 조회, 본인 배정·처방만 다루도록 객체 권한
 
 **프론트엔드**
 - 공통: 디자인 토큰, Pretendard 로컬 폰트, nav(관리자는 전체 메뉴), 범용 모달, 토스트, 반응형, 로그인·미션 선택·미션 없음 화면, 로그인 라우팅
 - 안내팀 페이지 완료 (폰 실기기 테스트 완료)
 - 접수팀 페이지 완료 (대기/완료 목록, 접수 폼, 의사 배정·취소, 읽기 전용, 환자 검색·신규 등록 모달, 환자정보 수정)
-- 진료팀 페이지 **일부**: 내 배정 목록, 진료 상세, vitals·병력·환자정보 수정, 다른 의사 배정 현황, 작성된 처방 조회, 새 처방 작성(진료과 선택, 분류·검색으로 약 탐색, 장바구니, 복용스케줄/수량 입력 전환, 약 없이 저장 가능)
+- 진료팀 페이지 완료: 진료 대기/오늘 진료 완료 목록, 진료 상세, vitals·병력·환자정보 수정, 다른 의사 배정 현황,
+  새 처방 작성(진료과 선택, 분류·검색으로 약 탐색, 장바구니, 복용스케줄/수량 입력 전환, 약 없이 저장 가능),
+  작성된 처방 수정·삭제(카드 편집 모드, 약 변경은 빼고 새 처방에서 다시 담기), 다른 의사 완료 처방 보기,
+  전과 모달·배정 취소, 진료 완료(확인 모달 → 패널 닫힘)·완료 후 읽기 전용·완료 취소
 
 ## 10. 앞으로 할 일
 
-**다음 작업 (진료팀 화면 마무리)**
-1. 작성된 처방 수정/삭제 UI — 백엔드는 준비됨(`PATCH/DELETE prescription-drugs/<pk>/clinical/`). 약 변경은 삭제 후 다시 담기 방식도 검토.
-2. "다른 의사에게 추가 배정(전과)" 버튼 동작 — `POST visit-departments/`, 이미 배정된 의사는 제외, 모달로 의사 선택. 버튼은 `clinical.html`에 있지만 핸들러가 없다.
-3. "진료 완료" 버튼 동작 — `PATCH visit-departments/<id>/ {is_done: true}`. 완료 후 읽기 전용 처리 방식 결정 필요.
+**다음 작업**
+- 약국팀 프론트엔드 (대기 목록 → 조제 화면 → 배치 선택 → 수령 처리, 재고 조회, 일별 통계, 처방약 수량 수정)
+  - `DispenseView`·`DispenseOptionsView`가 없는 id에 `.get()`을 써서 500이 난다 → `get_object_or_404` 또는 400 처리
+  - 약국팀 처방약 수정(`PrescriptionDrugUpdateView`)은 아직 수령 여부·미션 범위를 확인하지 않는다
 
 **그 이후**
-- 약국팀 프론트엔드 (대기 목록 → 조제 화면 → 배치 선택 → 수령 처리, 재고 조회, 일별 통계, 처방약 수량 수정)
 - 관리자 프론트엔드 (미션 탭 통계, 약품/배치/미션재고 CRUD 화면, 정산, export 다운로드)
 - 약국 수령 처리 API 수정: 처방은 있지만 약이 하나도 없는 환자(기도만 하는 경우)도 수령 처리가 되어야 한다. 현재 `DispenseView`가 `items`가 비면 400으로 막는다.
 - 약품 리스트 엑셀(`약품_리스트_아가페_2026_약품분류용1.xlsx`)을 `Drug`/`DrugCategory`/`DrugBatch`로 가져오는 `import_drugs` 관리 커맨드 (시트: 약속처방, 경구, 외용약, 비타민, 주사제, 소아, 추가약)
@@ -201,15 +217,19 @@ superuser는 백엔드 권한을 전부 통과하므로 nav에서 모든 역할 
 - 접수 기록 읽기 전용을 서버에서도 강제(`VisitVitalsUpdateView`에 검증 추가).
 - 누가 언제 무엇을 수정했는지 남기는 감사 로그(audit log).
 - 어제 이전의 미처리 배정을 자동으로 정리할지(현재는 오늘 날짜만 화면에 보여주고 DB에는 남긴다).
+- `Prescription`에 작성자 필드가 없어 "그 처방이 달린 배정의 의사"를 작성자로 본다. superuser가 대신 쓴 처방도 배정 의사 것으로 잡힌다.
+- 안내팀(`info.js`)은 아직 `common.js`를 쓰지 않고, 오류 메시지를 escape 없이 `innerHTML`에 넣는 곳이 있다.
 
 ## 11. 주의사항 (알려진 함정)
 
-- **코드가 기준이다.** Notion에 옮긴 설계 문서(`EMR_DB_설계`, `EMR_페이지_기능명세`, `EMR_API_공통구조`, `EMR_API_명세`)는 일부 오래됐다. 문서에 없고 코드에만 있는 것: `MissionStock`/`DrugBatch` 분리와 `source_detail`, `uses_dosage_schedule`, `User.primary_department`, 접수 대기 기준(맥박 → 주호소), 배정 취소 DELETE, 진료팀용 처방약 수정 URL.
+- **코드가 기준이다.** Notion에 옮긴 설계 문서(`EMR_DB_설계`, `EMR_페이지_기능명세`, `EMR_API_공통구조`, `EMR_API_명세`)는 일부 오래됐다. 문서에 없고 코드에만 있는 것: `MissionStock`/`DrugBatch` 분리와 `source_detail`, `uses_dosage_schedule`, `User.primary_department`, 접수 대기 기준(맥박 → 주호소), 배정 취소 DELETE, 진료팀용 처방약 수정 URL,
+  `VisitDepartment.assigned_by`/`done_at`, 처방 수정·삭제 API, 진료 완료 규칙, 진료팀 본인 배정 권한.
 - **날짜/시간대 불일치 가능성**: 로그인 응답의 `current_missions`는 `timezone.localdate()`, 권한·API는 `date.today()`를 쓴다. `settings.TIME_ZONE`과 서버 PC 시간대가 다르면 자정 근처에 미션이 어긋날 수 있다. 하나로 통일하고 현장 시간대(캄보디아)를 기준으로 설정할 것.
 - **`PrescriptionDrug.save()` 자동 계산**: PATCH로 `quantity`만 보내도 세 값(1회량·횟수·일수)이 있으면 덮어쓴다. 약국팀 수정은 `PrescriptionDrugUpdateSerializer.update()`에서 `instance.save(skip_recalculate=True)`를 직접 호출한다.
   `serializer.save(skip_recalculate=True)`처럼 kwarg로 넘기면 DRF가 데이터로 취급해서 동작하지 않는다.
 - `POST /visits/` 응답에는 `assignments`가 없다. 방문을 만든 직후 그 응답을 접수 화면 상태에 넣을 때 `assignments = []`를 직접 채워야 한다.
 - 접수 폼 맥박(`pr`)은 선택이다. "접수 대기" 판단에 `pr`을 쓰지 않는다(주호소 기준).
+- `runserver` 자동 재시작은 여러 .py 파일을 연달아 고치면 일부 변경을 놓칠 수 있다. 백엔드를 고쳤는데 API 응답이 그대로면 `runserver`를 직접 껐다 켠다(`manage.py shell`은 디스크 코드를 새로 읽어서 정상으로 보이니 헷갈리기 쉽다).
 - 브라우저가 옛 JS/CSS를 캐시한다. 수정이 안 먹힌 것처럼 보이면 `Ctrl+Shift+R`로 하드 리프레시한다. 계정을 바꿔 테스트할 때는 로그아웃 후 재로그인한다(`localStorage`에 이름·권한이 남는다).
 - Windows cmd에서 curl로 한글 파라미터를 보낼 때는 `curl -G <URL> --data-urlencode "search=한글"`을 쓴다. 헤더는 `Authorization: Token <키>`(`Token` 단어와 공백 필수).
 - 개발용 설정이 남아 있다: `ALLOWED_HOSTS = ['*']`, `DEBUG = True`. 현장 배포 전에 허용 IP를 좁히고 `SECRET_KEY`를 점검한다.
