@@ -50,6 +50,10 @@ class Department(models.Model):
 class DrugCategory1(models.Model):
     """경구/외용/비타민/주사제/소아/추가 - 엑셀 시트 탭 기준"""
     name = models.CharField(max_length=50, unique=True)
+    uses_dosage_schedule = models.BooleanField(
+        default=False,
+        help_text="체크하면 처방 시 1회량/1일횟수/일수로 입력, 해제하면 수량만 직접 입력",
+    )
 
     def __str__(self):
         return self.name

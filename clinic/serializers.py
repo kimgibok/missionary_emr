@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import Patient, Visit, VisitDepartment
+from .models import Patient, Visit, VisitDepartment, Department, DrugCategory1, DrugCategory2
 
 
 class PatientSerializer(serializers.ModelSerializer):
@@ -73,10 +73,33 @@ class VisitDepartmentListSerializer(serializers.ModelSerializer):
         model = VisitDepartment
         fields = ['id', 'visit', 'assigned_at', 'is_done']
 
+class VisitAssignmentSerializer(serializers.ModelSerializer):
+    """방문에 배정된 의사 한 명의 요약 (접수 완료 리스트/상세에서 사용)"""
+    doctor_id = serializers.IntegerField(source='user_id', read_only=True)
+    doctor_name = serializers.SerializerMethodField()
+    department_code = serializers.SerializerMethodField()
+
+    class Meta:
+        model = VisitDepartment
+        fields = ['id', 'doctor_id', 'doctor_name', 'department_code', 'is_done']
+
+    def get_doctor_name(self, obj):
+        return obj.user.name or obj.user.username
+
+    def get_department_code(self, obj):
+        return obj.user.primary_department.name if obj.user.primary_department else None
+        
+class VisitIntakeDetailSerializer(VisitDetailSerializer):
+    """접수 기록 열람용 - vitals/병력 전체 + 배정된 의사 요약"""
+    assignments = VisitAssignmentSerializer(source='visit_departments', many=True, read_only=True)
+
+    class Meta(VisitDetailSerializer.Meta):
+        fields = VisitDetailSerializer.Meta.fields + ['assignments']
+
 
 class VisitDepartmentDetailSerializer(serializers.ModelSerializer):
     """진료팀 - 진료 상세 조회 (환자+vitals+병력 nested)"""
-    visit = VisitDetailSerializer(read_only=True)
+    visit = VisitIntakeDetailSerializer(read_only=True)
 
     class Meta:
         model = VisitDepartment
@@ -115,10 +138,13 @@ class PrescriptionDrugCreateSerializer(serializers.ModelSerializer):
 class DrugSearchSerializer(serializers.Serializer):
     """진료팀 처방약 검색 - missionstock 기준, drug 정보 nested"""
     id = serializers.IntegerField()  # mission_stock id
+    drug_id = serializers.IntegerField(source='drugbatch.drug_id')
     drug_name = serializers.CharField(source='drugbatch.drug.name')
     ingredient = serializers.CharField(source='drugbatch.drug.ingredient')
     usage = serializers.CharField(source='drugbatch.drug.usage')
     cat1 = serializers.IntegerField(source='drugbatch.drug.cat1_id')
+    cat1_name = serializers.CharField(source='drugbatch.drug.cat1.name')
+    uses_dosage_schedule = serializers.BooleanField(source='drugbatch.drug.cat1.uses_dosage_schedule')
     cat2 = serializers.IntegerField(source='drugbatch.drug.cat2_id')
     remaining_qty = serializers.IntegerField()
     
@@ -185,21 +211,6 @@ class PrescriptionDrugUpdateSerializer(serializers.ModelSerializer):
         instance.save(skip_recalculate=True)
         return instance
     
-class VisitAssignmentSerializer(serializers.ModelSerializer):
-    """방문에 배정된 의사 한 명의 요약 (접수 완료 리스트/상세에서 사용)"""
-    doctor_id = serializers.IntegerField(source='user_id', read_only=True)
-    doctor_name = serializers.SerializerMethodField()
-    department_code = serializers.SerializerMethodField()
-
-    class Meta:
-        model = VisitDepartment
-        fields = ['id', 'doctor_id', 'doctor_name', 'department_code', 'is_done']
-
-    def get_doctor_name(self, obj):
-        return obj.user.name or obj.user.username
-
-    def get_department_code(self, obj):
-        return obj.user.primary_department.name if obj.user.primary_department else None
 
 
 class VisitIntakeListSerializer(VisitListSerializer):
@@ -210,9 +221,38 @@ class VisitIntakeListSerializer(VisitListSerializer):
         fields = VisitListSerializer.Meta.fields + ['assignments']
 
 
-class VisitIntakeDetailSerializer(VisitDetailSerializer):
-    """접수 기록 열람용 - vitals/병력 전체 + 배정된 의사 요약"""
-    assignments = VisitAssignmentSerializer(source='visit_departments', many=True, read_only=True)
 
-    class Meta(VisitDetailSerializer.Meta):
-        fields = VisitDetailSerializer.Meta.fields + ['assignments']
+        
+class DepartmentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Department
+        fields = ['id', 'name']
+
+
+class PrescriptionListSerializer(serializers.ModelSerializer):
+    """진료팀 - 같은 배정 건에 이미 쓴 처방 목록 (중복 처방 확인용)"""
+    department_name = serializers.CharField(source='department.name', read_only=True)
+    items = PrescriptionDrugItemSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Prescription
+        fields = ['id', 'department', 'department_name', 'clinical_note', 'items']
+        
+class PrescriptionDrugClinicalUpdateSerializer(serializers.ModelSerializer):
+    """진료팀 - 처방약 수정 (약/수량/복용스케줄 전부 변경 가능)"""
+    class Meta:
+        model = PrescriptionDrug
+        fields = ['id', 'prescription', 'drug', 'dose_per_intake', 'frequency_per_day', 'duration_days', 'quantity']
+        read_only_fields = ['id', 'prescription']
+        extra_kwargs = {'quantity': {'required': False}}
+        
+class DrugCategory1ReadSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DrugCategory1
+        fields = ['id', 'name', 'uses_dosage_schedule']
+
+
+class DrugCategory2ReadSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DrugCategory2
+        fields = ['id', 'name']

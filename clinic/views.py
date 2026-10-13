@@ -6,10 +6,11 @@ from rest_framework import generics, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Patient, Visit, VisitDepartment, MissionMembership
-from .permissions import IsInfoTeam, IsReceptionTeam, IsInfoOrReceptionTeam, get_active_memberships
+from .models import Patient, Visit, VisitDepartment, MissionMembership, Department, DrugCategory1, DrugCategory2
+from .permissions import IsInfoTeam, IsReceptionTeam, IsInfoOrReceptionTeam, role_permission, get_active_memberships, IsClinicalOrPharmacyTeam
 from .serializers import (
-    PatientSerializer, VisitCreateSerializer, VisitListSerializer, VisitVitalsSerializer, VisitIntakeListSerializer, VisitIntakeDetailSerializer,
+    PatientSerializer, VisitCreateSerializer, VisitListSerializer, VisitVitalsSerializer, VisitIntakeListSerializer, VisitIntakeDetailSerializer, DepartmentSerializer, PrescriptionListSerializer,
+    PrescriptionDrugClinicalUpdateSerializer, DrugCategory1ReadSerializer, DrugCategory2ReadSerializer
 )
 
 
@@ -166,11 +167,14 @@ class VisitDepartmentListCreateView(generics.ListCreateAPIView):
         return [IsClinicalTeam()]
 
     def get_queryset(self):
-        qs = VisitDepartment.objects.filter(user=self.request.user).select_related('visit__patient')
+        qs = (
+            VisitDepartment.objects.filter(user=self.request.user, visit__visit_date=date.today())
+            .select_related('visit__patient')
+        )
         is_done = self.request.query_params.get('is_done')
         if is_done is not None:
             qs = qs.filter(is_done=(is_done.lower() == 'true'))
-        return qs.order_by('assigned_at')
+        return qs.order_by('visit__reg_no')
 
 
 class VisitDepartmentDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -202,10 +206,22 @@ from .serializers import (
 )
 
 
-class PrescriptionCreateView(generics.CreateAPIView):
-    queryset = Prescription.objects.all()
-    serializer_class = PrescriptionCreateSerializer
+class PrescriptionListCreateView(generics.ListCreateAPIView):
+    """GET: 같은 배정 건의 처방 목록 / POST: 새 처방 작성"""
     permission_classes = [IsClinicalTeam]
+
+    def get_serializer_class(self):
+        if self.request.method == 'POST':
+            return PrescriptionCreateSerializer
+        return PrescriptionListSerializer
+
+    def get_queryset(self):
+        visit_department_id = self.request.query_params.get('visit_department')
+        if not visit_department_id:
+            return Prescription.objects.none()
+        return Prescription.objects.filter(
+            visit_department_id=visit_department_id
+        ).select_related('department').prefetch_related('items__drug')
 
 
 class PrescriptionDrugCreateView(generics.CreateAPIView):
@@ -380,5 +396,30 @@ class DispenseView(APIView):
 class PrescriptionDrugUpdateView(generics.UpdateAPIView):
     """약국팀 - 조제 중 재고불일치로 약품/수량 변경 필요 시"""
     queryset = PrescriptionDrug.objects.all()
-    serializer_class = PrescriptionDrugUpdateSerializer   # 이 줄만 변경
+    serializer_class = PrescriptionDrugUpdateSerializer
     permission_classes = [IsPharmacyTeam]
+    
+class PrescriptionDrugClinicalUpdateView(generics.UpdateAPIView, generics.DestroyAPIView):
+    """진료팀 - 처방약 내용 수정(재계산됨), 삭제"""
+    queryset = PrescriptionDrug.objects.all()
+    serializer_class = PrescriptionDrugClinicalUpdateSerializer
+    permission_classes = [IsClinicalTeam]
+    
+    
+# 진료팀
+class DepartmentListView(generics.ListAPIView):
+    """진료과 목록 - 읽기 전용, 처방 작성 시 선택지로 사용"""
+    queryset = Department.objects.all().order_by('name')
+    serializer_class = DepartmentSerializer
+    permission_classes = [IsClinicalTeam]
+
+class DrugCategory1ListView(generics.ListAPIView):
+    queryset = DrugCategory1.objects.all().order_by('name')
+    serializer_class = DrugCategory1ReadSerializer
+    permission_classes = [IsClinicalOrPharmacyTeam]
+
+
+class DrugCategory2ListView(generics.ListAPIView):
+    queryset = DrugCategory2.objects.all().order_by('name')
+    serializer_class = DrugCategory2ReadSerializer
+    permission_classes = [IsClinicalOrPharmacyTeam]
