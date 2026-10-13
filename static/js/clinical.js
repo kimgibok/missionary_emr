@@ -207,12 +207,52 @@ function readVitalsPayload() {
 
 // ----- 다른 배정 현황 -----
 function renderOtherAssignments(a) {
+    const me = a.visit.assignments.find((x) => x.id === a.id);
     const others = a.visit.assignments.filter((x) => x.id !== a.id);
-    byId('cl-other-assignments').innerHTML = others.map((x) => `
-        <span class="doctor-tag${x.is_done ? '' : ' waiting'}">
-            ${x.department_code ? escapeHtml(x.department_code) + ' · ' : ''}${escapeHtml(x.doctor_name)} · ${x.is_done ? '진료 완료' : '대기중'}
-        </span>`).join('');
+    byId('cl-other-assignments').innerHTML = others.map((x) => {
+        // 내가 추가한 배정이고 아직 진료 전이면 취소 가능 (처방이 있으면 서버가 거절)
+        const canCancel = !a.is_done && !x.is_done && me && x.assigned_by === me.doctor_id;
+        const cancelBtn = canCancel
+            ? `<button type="button" class="doctor-cancel transfer-cancel" data-assignment-id="${x.id}" data-doctor-name="${escapeHtml(x.doctor_name)}"><span>배정 취소</span></button>`
+            : '';
+        return `
+            <span class="other-assignment">
+                <span class="doctor-tag${x.is_done ? '' : ' waiting'}">
+                    ${x.department_code ? escapeHtml(x.department_code) + ' · ' : ''}${escapeHtml(x.doctor_name)} · ${x.is_done ? '진료 완료' : '대기중'}
+                </span>
+                ${cancelBtn}
+            </span>`;
+    }).join('');
 }
+
+function requestCancelTransfer(assignmentId, name) {
+    openModal({
+        title: '추가 배정 취소',
+        bodyHtml: `<p>${escapeHtml(name)} 선생님 배정을 취소할까요? 그 선생님의 대기 목록에서 이 환자가 빠집니다.</p>`,
+        confirmLabel: '배정 취소',
+        onConfirm: () => { cancelTransfer(assignmentId); },
+    });
+}
+
+async function cancelTransfer(assignmentId) {
+    if (isBusy) return;
+    isBusy = true;
+    try {
+        await apiFetch(`/visit-departments/${assignmentId}/`, { method: 'DELETE' });
+        showToast('배정을 취소했습니다.');
+    } catch (err) {
+        showToast(err.message, true);
+    } finally {
+        isBusy = false;
+    }
+    await refreshOtherAssignments();
+}
+
+byId('cl-other-assignments').addEventListener('click', (e) => {
+    const btn = e.target.closest('.doctor-cancel');
+    if (!btn) return;
+    requestCancelTransfer(Number(btn.dataset.assignmentId), btn.dataset.doctorName);
+});
 
 // ----- 이미 쓴 처방 (조회 + 수정/삭제) -----
 let rxList = [];        // 서버에서 받은 이 배정의 처방 목록
@@ -447,6 +487,7 @@ async function openAssignment(id) {
         fillHeader(a);
         fillVitalsForm(a.visit);
         renderOtherAssignments(a);
+        byId('cl-transfer-btn').hidden = a.is_done;   // 내 진료가 끝났으면 전과 불가
         isDirty = false;
         byId('cl-vitals-error').textContent = '';
 
@@ -624,6 +665,112 @@ async function savePatientEdit() {
 }
 
 byId('cl-edit-patient-btn').addEventListener('click', openPatientEditModal);
+
+// ----- 다른 의사에게 추가 배정 (전과) -----
+function doctorLabel(name, deptCode) {
+    return deptCode ? `${escapeHtml(deptCode)} · ${escapeHtml(name)}` : escapeHtml(name);
+}
+
+async function openTransferModal() {
+    if (!currentAssignment || isBusy) return;
+
+    let doctors;
+    try {
+        doctors = await apiFetch('/visit-departments/wait-counts/');
+    } catch (err) {
+        showToast(err.message, true);
+        return;
+    }
+
+    const assignments = currentAssignment.visit.assignments;
+    const myDoctorId = assignments.find((x) => x.id === currentAssignment.id)?.doctor_id;
+    const assignedIds = new Set(assignments.map((x) => x.doctor_id));
+
+    // 나와 이미 배정된 의사는 고를 수 없게 회색으로
+    const options = doctors.map((d) => {
+        if (assignedIds.has(d.doctor_id)) {
+            return `
+                <div class="doctor-option assigned">
+                    <span class="doctor-option-name">${doctorLabel(d.doctor_name, d.department_code)}</span>
+                    <span class="doctor-tag waiting">${d.doctor_id === myDoctorId ? '나' : '배정됨'}</span>
+                </div>`;
+        }
+        return `
+            <label class="doctor-option">
+                <input type="checkbox" data-doctor-id="${d.doctor_id}" data-doctor-name="${escapeHtml(d.doctor_name)}">
+                <span class="doctor-option-name">${doctorLabel(d.doctor_name, d.department_code)}</span>
+                <span class="doctor-option-wait">${d.waiting_count}명 대기</span>
+            </label>`;
+    }).join('');
+
+    openModal({
+        title: '다른 의사에게 추가 배정',
+        bodyHtml: `
+            <p class="modal-note">선택한 의사의 대기 목록에 이 환자가 추가됩니다. 내 진료는 따로 [진료 완료]를 눌러 끝내주세요.</p>
+            <div class="doctor-picker">${options || '<p class="empty-text">진료팀 의사가 없습니다.</p>'}</div>
+            <p class="error-message" id="transfer-error"></p>`,
+        confirmLabel: '배정하기',
+        onConfirm: () => { saveTransfer(); return false; },
+    });
+}
+
+async function saveTransfer() {
+    if (!currentAssignment || isBusy) return;
+
+    const errorEl = byId('transfer-error');
+    errorEl.textContent = '';
+
+    const picked = [...document.querySelectorAll('#modal-body input[data-doctor-id]:checked')]
+        .map((input) => ({ id: Number(input.dataset.doctorId), name: input.dataset.doctorName }));
+    if (picked.length === 0) {
+        errorEl.textContent = '배정할 의사를 선택해주세요.';
+        return;
+    }
+
+    isBusy = true;
+    const done = [];
+    const failed = [];
+    for (const doctor of picked) {
+        try {
+            await apiFetch('/visit-departments/', {
+                method: 'POST',
+                body: JSON.stringify({ visit: currentAssignment.visit.id, user: doctor.id }),
+            });
+            done.push(doctor.name);
+        } catch (err) {
+            failed.push(`${doctor.name}(${err.message})`);
+        }
+    }
+    isBusy = false;
+
+    // 전부 실패면 모달을 열어둔 채 이유를 보여준다
+    if (done.length === 0) {
+        errorEl.textContent = `배정하지 못했습니다: ${failed.join(', ')}`;
+        return;
+    }
+
+    closeModal();
+    if (failed.length > 0) {
+        showToast(`${done.join(', ')} 배정 완료 / 실패: ${failed.join(', ')}`, true);
+    } else {
+        showToast(`${done.join(', ')} 선생님에게 추가 배정했습니다.`);
+    }
+    await refreshOtherAssignments();
+}
+
+// 배정 현황만 다시 받아서 갱신 (입력 중인 vitals·처방 폼은 건드리지 않음)
+async function refreshOtherAssignments() {
+    if (!currentAssignment) return;
+    try {
+        const a = await apiFetch(`/visit-departments/${currentAssignment.id}/`);
+        currentAssignment.visit.assignments = a.visit.assignments;
+        renderOtherAssignments(currentAssignment);
+    } catch (err) {
+        console.error(err);
+    }
+}
+
+byId('cl-transfer-btn').addEventListener('click', openTransferModal);
 
 // =====================================================
 // 진료과 / 약품 카테고리 / 처방 작성

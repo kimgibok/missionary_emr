@@ -47,6 +47,30 @@ IsInfoOrReceptionOrClinicalTeam = role_permission('안내팀', '접수팀', '진
 IsClinicalOrPharmacyTeam = role_permission('진료팀', '약국팀')
 
 
+def can_add_assignment(user, visit):
+    """
+    이 방문에 의사를 배정(추가)할 수 있는지.
+    superuser·접수팀은 어느 방문이든 가능, 진료팀은 그 방문에 '본인의 미완료 배정'이 있을 때만(전과).
+    """
+    if user.is_superuser or has_role(user, ['접수팀']):
+        return True
+    return visit.visit_departments.filter(user=user, is_done=False).exists()
+
+
+class CanCancelAssignment(BasePermission):
+    """
+    배정 취소(DELETE) 대상 확인. superuser·접수팀은 모든 배정, 진료팀은 본인이 한 배정(assigned_by)만.
+    역할 확인은 하지 않으니 IsReceptionOrClinicalTeam과 같이 쓴다.
+    """
+    message = '본인이 추가한 배정만 취소할 수 있습니다.'
+
+    def has_object_permission(self, request, view, obj):
+        user = request.user
+        if user.is_superuser or has_role(user, ['접수팀']):
+            return True
+        return obj.assigned_by_id == user.id
+
+
 def owns_visit_department(user, visit_department):
     """그 배정을 받은 의사 본인이면 True. superuser는 항상 True."""
     return user.is_superuser or visit_department.user_id == user.id

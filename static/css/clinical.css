@@ -9,6 +9,33 @@
     display: none;
 }
 
+/* 배정 태그 + [취소] 버튼 한 묶음 */
+.other-assignment {
+    display: inline-flex;
+    align-items: center;
+}
+
+/* 버튼(투명)은 터치 영역 44px을 유지하고, 안쪽 span만 작은 알약 모양으로 보이게 */
+.transfer-cancel {
+    display: inline-flex;
+    align-items: center;
+    padding: 0 0 0 6px;
+}
+
+.transfer-cancel span {
+    padding: 3px 10px;
+    border: 1px solid rgba(178, 58, 46, 0.35);
+    border-radius: 999px;
+    background: var(--color-surface);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-danger);
+}
+
+.transfer-cancel:hover span {
+    background: rgba(178, 58, 46, 0.08);
+}
+
 .prescription-list {
     display: flex;
     flex-direction: column;

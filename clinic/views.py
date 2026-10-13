@@ -7,7 +7,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import Patient, Visit, VisitDepartment, MissionMembership, Department, DrugCategory1, DrugCategory2
-from .permissions import IsInfoTeam, IsReceptionTeam, IsInfoOrReceptionTeam, role_permission, get_active_memberships, IsClinicalOrPharmacyTeam
+from .permissions import IsInfoTeam, IsReceptionTeam, IsInfoOrReceptionTeam, role_permission, get_active_memberships, IsClinicalOrPharmacyTeam, IsInfoOrReceptionOrClinicalTeam
 from .serializers import (
     PatientSerializer, VisitCreateSerializer, VisitListSerializer, VisitVitalsSerializer, VisitIntakeListSerializer, VisitIntakeDetailSerializer, DepartmentSerializer, PrescriptionListSerializer,
     PrescriptionDrugClinicalUpdateSerializer, DrugCategory1ReadSerializer, DrugCategory2ReadSerializer
@@ -98,8 +98,8 @@ class VisitListCreateView(generics.ListCreateAPIView):
 
 
 class DoctorWaitCountsView(APIView):
-    """이번 미션의 진료팀 의사 전원 + 각자의 대기 인원 (대기 0명인 의사도 포함)"""
-    permission_classes = [IsInfoOrReceptionTeam]
+    """이번 미션의 진료팀 의사 전원 + 각자의 대기 인원 (대기 0명인 의사도 포함) - 진료팀은 전과 모달에서 사용"""
+    permission_classes = [IsInfoOrReceptionOrClinicalTeam]
 
     def get(self, request):
         mission = get_current_mission(request.user)
@@ -134,7 +134,7 @@ class DoctorWaitCountsView(APIView):
 # 의사 배정
 from rest_framework.exceptions import PermissionDenied
 
-from .permissions import IsClinicalTeam, IsReceptionOrClinicalTeam, IsInfoOrReceptionOrClinicalTeam, IsPrescriptionOwner, owns_visit_department
+from .permissions import IsClinicalTeam, IsReceptionOrClinicalTeam, IsPrescriptionOwner, owns_visit_department, can_add_assignment, CanCancelAssignment
 from .serializers import (
     VisitDepartmentListSerializer, VisitDepartmentDetailSerializer, VisitDepartmentDoneSerializer, VisitDepartmentCreateSerializer,
 )
@@ -178,14 +178,19 @@ class VisitDepartmentListCreateView(generics.ListCreateAPIView):
             qs = qs.filter(is_done=(is_done.lower() == 'true'))
         return qs.order_by('visit__reg_no')
 
+    def perform_create(self, serializer):
+        if not can_add_assignment(self.request.user, serializer.validated_data['visit']):
+            raise PermissionDenied('본인이 진료 중(완료 전)인 환자에게만 다른 의사를 추가 배정할 수 있습니다.')
+        serializer.save(assigned_by=self.request.user)
+
 
 class VisitDepartmentDetailView(generics.RetrieveUpdateDestroyAPIView):
-    """GET/PATCH: 진료팀 상세조회·진료완료 / DELETE: 접수팀의 의사 배정 취소"""
+    """GET/PATCH: 진료팀 상세조회·진료완료 / DELETE: 의사 배정 취소 (접수팀 전부, 진료팀은 본인이 한 배정만)"""
     queryset = VisitDepartment.objects.select_related('visit__patient')
 
     def get_permissions(self):
         if self.request.method == 'DELETE':
-            return [IsReceptionTeam()]
+            return [IsReceptionOrClinicalTeam(), CanCancelAssignment()]
         return [IsClinicalTeam()]
 
     def get_serializer_class(self):

@@ -46,6 +46,12 @@ class VisitDepartmentCreateSerializer(serializers.ModelSerializer):
         model = VisitDepartment
         fields = ['id', 'visit', 'user']
         read_only_fields = ['id']
+
+    def validate(self, attrs):
+        # 같은 방문에 같은 의사를 두 번 배정하지 않는다 (접수팀 배정·진료팀 전과 공통)
+        if VisitDepartment.objects.filter(visit=attrs['visit'], user=attrs['user']).exists():
+            raise serializers.ValidationError({'detail': '이미 이 환자에게 배정된 의사입니다.'})
+        return attrs
         
 
 ## 진료팀이 확인할 데이터 serializer
@@ -81,7 +87,7 @@ class VisitAssignmentSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = VisitDepartment
-        fields = ['id', 'doctor_id', 'doctor_name', 'department_code', 'is_done']
+        fields = ['id', 'doctor_id', 'doctor_name', 'department_code', 'is_done', 'assigned_by']
 
     def get_doctor_name(self, obj):
         return obj.user.name or obj.user.username

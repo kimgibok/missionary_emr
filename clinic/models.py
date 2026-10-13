@@ -127,6 +127,9 @@ class VisitDepartment(models.Model):
     """
     visit = models.ForeignKey(Visit, on_delete=models.CASCADE, related_name="visit_departments")
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="assigned_visits")    # 배정의사
+    assigned_by = models.ForeignKey(    # 배정한 사람(접수팀 또는 전과한 의사) - 진료팀은 본인이 한 배정만 취소 가능
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="assignments_made",
+    )
     assigned_at = models.DateTimeField(auto_now_add=True)
     is_done = models.BooleanField(default=False)    # 진료완료
 
