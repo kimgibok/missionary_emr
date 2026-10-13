@@ -2,7 +2,7 @@ from datetime import date
 
 from rest_framework.permissions import BasePermission
 
-from .models import MissionMembership
+from .models import MissionMembership, VisitDepartment
 
 
 def get_active_memberships(user):
@@ -71,9 +71,25 @@ class CanCancelAssignment(BasePermission):
         return obj.assigned_by_id == user.id
 
 
+def is_assigned_to_visit(user, visit_id):
+    """이 방문(환자)에 배정된 의사인지 - 같은 환자를 본 다른 의사의 처방을 읽을 때 사용. superuser는 항상 True."""
+    return user.is_superuser or VisitDepartment.objects.filter(visit_id=visit_id, user=user).exists()
+
+
 def owns_visit_department(user, visit_department):
     """그 배정을 받은 의사 본인이면 True. superuser는 항상 True."""
     return user.is_superuser or visit_department.user_id == user.id
+
+
+class IsAssignedDoctor(BasePermission):
+    """
+    배정(VisitDepartment) 조회·진료 완료 처리는 그 배정의 의사 본인만. superuser는 항상 통과.
+    역할 확인은 하지 않으니 IsClinicalTeam과 같이 쓴다.
+    """
+    message = '본인에게 배정된 환자만 조회·처리할 수 있습니다.'
+
+    def has_object_permission(self, request, view, obj):
+        return owns_visit_department(request.user, obj)
 
 
 class IsPrescriptionOwner(BasePermission):

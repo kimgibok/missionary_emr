@@ -19,11 +19,20 @@
 
         <section class="card">
             <div class="card-head">
-                <h2 class="card-title">내 배정 목록</h2>
+                <h2 class="card-title">진료 대기</h2>
                 <span class="count-badge" id="assign-count">0명</span>
             </div>
-            <p class="section-hint">미완료 환자가 등록번호 순으로 먼저 보입니다.</p>
+            <p class="section-hint">나에게 배정된 오늘 환자가 등록번호 순으로 보입니다.</p>
             <div id="assign-list" class="queue-list"></div>
+        </section>
+
+        <section class="card">
+            <div class="card-head">
+                <h2 class="card-title">오늘 진료 완료</h2>
+                <span class="count-badge" id="done-assign-count">0명</span>
+            </div>
+            <p class="section-hint">최근에 완료한 환자가 위에 보입니다. 눌러서 다시 보거나, 약국 수령 전이면 [완료 취소]할 수 있어요.</p>
+            <div id="done-assign-list" class="queue-list"></div>
         </section>
 
         <section class="intake-panel" id="clinical-panel" hidden>
@@ -43,6 +52,7 @@
             </div>
 
             <div id="cl-other-assignments" class="other-assignments"></div>
+            <p class="readonly-notice" id="cl-readonly-notice" hidden>진료가 완료된 환자입니다. 수정하려면 맨 아래 [완료 취소]를 눌러주세요.</p>
 
             <h3 class="form-section-title">활력징후 / 병력</h3>
             <form id="cl-vitals-form">
@@ -103,11 +113,20 @@
                 </div>
 
                 <p class="error-message" id="cl-vitals-error"></p>
-                <button class="btn-secondary" type="submit">정보 수정 저장</button>
+                <button class="btn-secondary" type="submit" id="cl-vitals-submit">정보 수정 저장</button>
             </form>
+
+            <div id="cl-others-rx-section" hidden>
+                <div class="section-head-row">
+                    <h3 class="form-section-title">다른 의사 처방 <span class="section-head-sub">진료 완료분 · 중복 처방 확인용</span></h3>
+                    <button class="btn-secondary btn-small" type="button" id="cl-others-rx-refresh">새로고침</button>
+                </div>
+                <div id="cl-others-rx" class="prescription-list"></div>
+            </div>
 
             <h3 class="form-section-title">작성된 처방</h3>
             <div id="cl-prescriptions" class="prescription-list"></div>
+            <div id="cl-new-rx">
             <h3 class="form-section-title">새 처방 작성</h3>
             <div class="field-grid-2">
                 <div>
@@ -138,10 +157,12 @@
 
             <p class="error-message" id="rx-error"></p>
             <button class="btn-primary" type="button" id="rx-save-btn">처방 저장</button>
+            </div>
 
             <div class="intake-actions clinical-footer-actions">
                 <button class="btn-secondary" type="button" id="cl-transfer-btn">다른 의사에게 추가 배정</button>
                 <button class="btn-primary" type="button" id="cl-complete-btn">진료 완료</button>
+                <button class="btn-secondary" type="button" id="cl-uncomplete-btn" hidden>완료 취소</button>
             </div>
         </section>
         <div id="panel-dock"></div>

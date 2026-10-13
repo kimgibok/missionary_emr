@@ -1,3 +1,4 @@
+from django.utils import timezone
 from rest_framework import serializers
 
 from .models import Patient, Visit, VisitDepartment, Department, DrugCategory1, DrugCategory2
@@ -77,7 +78,7 @@ class VisitDepartmentListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = VisitDepartment
-        fields = ['id', 'visit', 'assigned_at', 'is_done']
+        fields = ['id', 'visit', 'assigned_at', 'is_done', 'done_at']
 
 class VisitAssignmentSerializer(serializers.ModelSerializer):
     """방문에 배정된 의사 한 명의 요약 (접수 완료 리스트/상세에서 사용)"""
@@ -113,11 +114,28 @@ class VisitDepartmentDetailSerializer(serializers.ModelSerializer):
 
 
 class VisitDepartmentDoneSerializer(serializers.ModelSerializer):
-    """진료 완료 처리용"""
+    """진료 완료 처리 / 완료 취소용"""
     class Meta:
         model = VisitDepartment
         fields = ['id', 'is_done']
         read_only_fields = ['id']
+
+    def validate(self, attrs):
+        # 오류를 'detail'로 내야 화면에 "is_done: ..." 같은 필드명이 붙지 않는다
+        is_done = attrs.get('is_done')
+        prescriptions = self.instance.prescriptions
+        if is_done and not prescriptions.exists():
+            # 처방이 없으면 약국 대기에 안 나타나므로 완료를 막는다 (약이 없으면 '처방약 없이' 처방을 저장)
+            raise serializers.ValidationError({'detail': '처방을 하나 이상 저장해야 진료를 완료할 수 있습니다.'})
+        if is_done is False and prescriptions.filter(is_dispensed=True).exists():
+            raise serializers.ValidationError({'detail': '약국에서 이미 수령 처리되어 완료를 취소할 수 없습니다.'})
+        return attrs
+
+    def update(self, instance, validated_data):
+        # 완료 시각 기록 (완료 목록 최신순 정렬용), 완료 취소하면 비움
+        if 'is_done' in validated_data:
+            validated_data['done_at'] = timezone.now() if validated_data['is_done'] else None
+        return super().update(instance, validated_data)
         
 ## 진료팀 - 처방 관련 serializer
 from .models import Prescription, PrescriptionDrug, MissionStock
@@ -255,7 +273,7 @@ class PrescriptionListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Prescription
-        fields = ['id', 'department', 'department_name', 'clinical_note', 'is_dispensed', 'items']
+        fields = ['id', 'visit_department', 'department', 'department_name', 'clinical_note', 'is_dispensed', 'items']
 
 
 class PrescriptionUpdateSerializer(serializers.ModelSerializer):

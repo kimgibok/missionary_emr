@@ -43,6 +43,39 @@
     margin-bottom: 20px;
 }
 
+/* ---------- 다른 의사 처방 (읽기 전용) ---------- */
+.section-head-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+}
+
+.section-head-sub {
+    margin-left: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--color-text-muted);
+}
+
+.others-rx-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.others-rx-doctor {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-accent);
+}
+
+/* 내 처방 카드와 구분되게 테두리만 */
+#cl-others-rx .prescription-card {
+    background: var(--color-surface);
+    border: 1px dashed var(--color-border);
+}
+
 .prescription-card {
     padding: 14px;
     background: var(--color-bg);

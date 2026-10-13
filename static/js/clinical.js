@@ -43,30 +43,36 @@ function showToast(message, isError = false) {
     toastTimer = setTimeout(() => el.classList.remove('show'), 2800);
 }
 
-// ----- 배정 목록 -----
+// ----- 배정 목록 (진료 대기 / 오늘 진료 완료) -----
+function doneTimeLabel(doneAt) {
+    if (!doneAt) return '완료';
+    const d = new Date(doneAt);
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')} 완료`;
+}
+
+function assignItemHtml(a) {
+    const selected = currentAssignment && currentAssignment.id === a.id ? ' selected' : '';
+    return `
+        <button type="button" class="queue-item${selected}" data-assignment-id="${a.id}">
+            <span class="queue-item-no ticket-number">${a.visit.reg_no}</span>
+            <span class="queue-item-main">
+                <span class="queue-item-name">${escapeHtml(a.visit.patient.name_kr)}</span>
+                <span class="queue-item-meta">${escapeHtml(patientMeta(a.visit))}</span>
+            </span>
+            <span class="doctor-tag${a.is_done ? '' : ' waiting'}">${a.is_done ? doneTimeLabel(a.done_at) : '대기'}</span>
+        </button>`;
+}
+
+function renderQueue(listId, badgeId, data, emptyText) {
+    byId(badgeId).textContent = `${data.count}명`;
+    byId(listId).innerHTML = data.results.length === 0
+        ? `<p class="empty-text">${emptyText}</p>`
+        : data.results.map(assignItemHtml).join('');
+}
+
 function renderAssignList() {
-    byId('assign-count').textContent = `${assignList.count}명`;
-    const el = byId('assign-list');
-
-    if (assignList.results.length === 0) {
-        el.innerHTML = '<p class="empty-text">배정된 환자가 없습니다.</p>';
-        placePanel();
-        return;
-    }
-
-    el.innerHTML = assignList.results.map(a => {
-        const selected = currentAssignment && currentAssignment.id === a.id ? ' selected' : '';
-        return `
-            <button type="button" class="queue-item${selected}" data-assignment-id="${a.id}">
-                <span class="queue-item-no ticket-number">${a.visit.reg_no}</span>
-                <span class="queue-item-main">
-                    <span class="queue-item-name">${escapeHtml(a.visit.patient.name_kr)}</span>
-                    <span class="queue-item-meta">${escapeHtml(patientMeta(a.visit))}</span>
-                </span>
-                <span class="doctor-tag${a.is_done ? '' : ' waiting'}">${a.is_done ? '완료' : '대기'}</span>
-            </button>`;
-    }).join('');
-
+    renderQueue('assign-list', 'assign-count', assignList.waiting, '대기 중인 환자가 없습니다.');
+    renderQueue('done-assign-list', 'done-assign-count', assignList.done, '아직 진료를 완료한 환자가 없습니다.');
     placePanel();
 }
 
@@ -109,9 +115,11 @@ clinicalPanel.addEventListener('focusout', () => {
 });
 
 async function loadAssignList() {
-    const data = await apiFetch('/visit-departments/?is_done=false');
-    const doneData = await apiFetch('/visit-departments/?is_done=true');
-    const merged = { count: data.count + doneData.count, results: [...data.results, ...doneData.results] };
+    const [waiting, done] = await Promise.all([
+        apiFetch('/visit-departments/?is_done=false&page_size=200'),
+        apiFetch('/visit-departments/?is_done=true&page_size=200'),   // 서버가 완료 시각 최신순으로 정렬
+    ]);
+    const merged = { waiting, done };
 
     const signature = JSON.stringify(merged);
     if (signature === assignSignature) return;
@@ -258,10 +266,13 @@ byId('cl-other-assignments').addEventListener('click', (e) => {
 let rxList = [];        // 서버에서 받은 이 배정의 처방 목록
 let editingRx = null;   // 편집 중인 처방 { id, items } - 한 번에 하나만
 
-function rxViewHtml(p) {
-    const side = p.is_dispensed
-        ? '<span class="doctor-tag">수령 완료</span>'
-        : '<button type="button" class="btn-secondary btn-small" data-action="edit-rx">수정</button>';
+function rxViewHtml(p, readOnly = false) {
+    let side = '';
+    if (p.is_dispensed) {
+        side = '<span class="doctor-tag">수령 완료</span>';
+    } else if (!readOnly && !currentAssignment.is_done) {
+        side = '<button type="button" class="btn-secondary btn-small" data-action="edit-rx">수정</button>';
+    }
     return `
         <div class="prescription-card" data-rx-id="${p.id}">
             <div class="prescription-card-head">
@@ -323,6 +334,41 @@ async function loadPrescriptions(visitDepartmentId) {
     rxList = data.results;
     renderPrescriptions();
 }
+
+// ----- 다른 의사 처방 (진료 완료분, 읽기 전용) - 같은 약 중복 처방 방지용 -----
+async function loadOtherPrescriptions() {
+    if (!currentAssignment) return;
+    const others = currentAssignment.visit.assignments.filter((x) => x.id !== currentAssignment.id);
+    const section = byId('cl-others-rx-section');
+    section.hidden = others.length === 0;   // 다른 의사가 없으면 영역 자체를 숨김
+    if (others.length === 0) return;
+
+    const el = byId('cl-others-rx');
+    try {
+        const data = await apiFetch(`/prescriptions/?visit=${currentAssignment.visit.id}&page_size=100`);
+        const list = data.results.filter((p) => p.visit_department !== currentAssignment.id);
+        if (list.length === 0) {
+            el.innerHTML = '<p class="empty-text">아직 진료를 완료한 다른 의사가 없습니다.</p>';
+            return;
+        }
+        // 의사별로 묶어서 "FM · 김의사" 머리말 아래에 처방 카드
+        el.innerHTML = others.map((a) => {
+            const mine = list.filter((p) => p.visit_department === a.id);
+            if (mine.length === 0) return '';
+            return `
+                <div class="others-rx-group">
+                    <div class="others-rx-doctor">${doctorLabel(a.doctor_name, a.department_code)}</div>
+                    ${mine.map((p) => rxViewHtml(p, true)).join('')}
+                </div>`;
+        }).join('');
+    } catch (err) {
+        el.innerHTML = `<p class="empty-text" style="color: var(--color-danger);">${escapeHtml(err.message)}</p>`;
+    }
+}
+
+byId('cl-others-rx-refresh').addEventListener('click', async () => {
+    await refreshOtherAssignments();   // 배정 현황(완료 여부)도 같이 갱신
+});
 
 // 서버 처방약 → 장바구니와 같은 모양의 편집용 항목
 function toEditItem(i) {
@@ -487,7 +533,7 @@ async function openAssignment(id) {
         fillHeader(a);
         fillVitalsForm(a.visit);
         renderOtherAssignments(a);
-        byId('cl-transfer-btn').hidden = a.is_done;   // 내 진료가 끝났으면 전과 불가
+        applyReadOnly();
         isDirty = false;
         byId('cl-vitals-error').textContent = '';
 
@@ -495,10 +541,24 @@ async function openAssignment(id) {
         scrollToSelected();
         resetRxForm();
         editingRx = null;
-        await loadPrescriptions(id);
+        await Promise.all([loadPrescriptions(id), loadOtherPrescriptions()]);
     } catch (err) {
         showToast(err.message, true);
     }
+}
+
+// ----- 읽기 전용 (내 진료가 완료된 배정) -----
+// vitals는 다른 의사가 아직 진료 중일 수 있어 서버는 막지 않고 화면에서만 잠근다
+function applyReadOnly() {
+    const done = Boolean(currentAssignment && currentAssignment.is_done);
+    byId('cl-readonly-notice').hidden = !done;
+    byId('cl-vitals-form').querySelectorAll('input, select, textarea').forEach((el) => { el.disabled = done; });
+    byId('cl-vitals-submit').hidden = done;
+    byId('cl-edit-patient-btn').hidden = done;
+    byId('cl-new-rx').hidden = done;
+    byId('cl-transfer-btn').hidden = done;
+    byId('cl-complete-btn').hidden = done;
+    byId('cl-uncomplete-btn').hidden = !done;
 }
 
 function scrollToSelected() {
@@ -545,10 +605,12 @@ function requestClosePanel() {
     }
 }
 
-byId('assign-list').addEventListener('click', (e) => {
-    const item = e.target.closest('.queue-item');
-    if (!item) return;
-    requestOpenAssignment(Number(item.dataset.assignmentId));
+['assign-list', 'done-assign-list'].forEach((listId) => {
+    byId(listId).addEventListener('click', (e) => {
+        const item = e.target.closest('.queue-item');
+        if (!item) return;
+        requestOpenAssignment(Number(item.dataset.assignmentId));
+    });
 });
 
 byId('cl-close-btn').addEventListener('click', requestClosePanel);
@@ -765,12 +827,90 @@ async function refreshOtherAssignments() {
         const a = await apiFetch(`/visit-departments/${currentAssignment.id}/`);
         currentAssignment.visit.assignments = a.visit.assignments;
         renderOtherAssignments(currentAssignment);
+        await loadOtherPrescriptions();
     } catch (err) {
         console.error(err);
     }
 }
 
 byId('cl-transfer-btn').addEventListener('click', openTransferModal);
+
+// ----- 진료 완료 / 완료 취소 -----
+function requestComplete() {
+    if (!currentAssignment || currentAssignment.is_done || isBusy) return;
+
+    // 처방이 없으면 약국 대기에 안 나타나므로 서버도 막는다 - 미리 안내
+    if (rxList.length === 0) {
+        showToast('처방을 하나 이상 저장해야 진료를 완료할 수 있습니다. 약이 없으면 약 없이 처방을 저장해주세요.', true);
+        return;
+    }
+
+    const othersWaiting = currentAssignment.visit.assignments
+        .filter((x) => x.id !== currentAssignment.id && !x.is_done);
+    const notes = [
+        `<p class="modal-note">작성한 처방 ${rxList.length}건으로 진료를 마칩니다. 완료 후에는 수정할 수 없고, 약국 수령 전까지만 [완료 취소]로 되돌릴 수 있어요.</p>`,
+    ];
+    if (othersWaiting.length > 0) {
+        const names = othersWaiting.map((x) => escapeHtml(x.doctor_name)).join(', ');
+        notes.push(`<p class="modal-note">다른 의사(${names}) 진료가 끝나야 약국 대기에 올라갑니다.</p>`);
+    }
+    if (isDirty || editingRx) {
+        notes.push('<p class="error-message">저장하지 않은 입력이 있습니다. 완료하면 사라져요.</p>');
+    }
+
+    openModal({
+        title: '진료 완료',
+        bodyHtml: notes.join(''),
+        confirmLabel: '진료 완료',
+        onConfirm: () => { completeAssignment(); },
+    });
+}
+
+async function setAssignmentDone(isDone) {
+    if (!currentAssignment || isBusy) return false;
+    isBusy = true;
+    try {
+        await apiFetch(`/visit-departments/${currentAssignment.id}/`, {
+            method: 'PATCH',
+            body: JSON.stringify({ is_done: isDone }),
+        });
+        return true;
+    } catch (err) {
+        showToast(err.message, true);
+        return false;
+    } finally {
+        isBusy = false;
+    }
+}
+
+async function completeAssignment() {
+    const name = currentAssignment.visit.patient.name_kr;
+    if (!(await setAssignmentDone(true))) return;
+    showToast(`${name} 진료를 완료했습니다.`);
+    resetPanel();        // 패널 닫고 목록으로
+    refreshAll(true);
+}
+
+function requestUncomplete() {
+    if (!currentAssignment || !currentAssignment.is_done) return;
+    openModal({
+        title: '완료 취소',
+        bodyHtml: '<p>진료 완료를 취소하고 다시 수정할 수 있게 합니다. 약국 대기에 올라가 있었다면 다시 빠집니다.</p>',
+        confirmLabel: '완료 취소',
+        onConfirm: () => { uncompleteAssignment(); },
+    });
+}
+
+async function uncompleteAssignment() {
+    const id = currentAssignment.id;
+    if (!(await setAssignmentDone(false))) return;
+    showToast('완료를 취소했습니다. 다시 수정할 수 있어요.');
+    await openAssignment(id);   // 수정 가능한 상태로 다시 열기
+    refreshAll(true);
+}
+
+byId('cl-complete-btn').addEventListener('click', requestComplete);
+byId('cl-uncomplete-btn').addEventListener('click', requestUncomplete);
 
 // =====================================================
 // 진료과 / 약품 카테고리 / 처방 작성

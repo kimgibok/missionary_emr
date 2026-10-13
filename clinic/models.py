@@ -132,6 +132,7 @@ class VisitDepartment(models.Model):
     )
     assigned_at = models.DateTimeField(auto_now_add=True)
     is_done = models.BooleanField(default=False)    # 진료완료
+    done_at = models.DateTimeField(null=True, blank=True)   # 진료완료 시각 (완료 목록 최신순 정렬용, 완료 취소하면 비움)
 
     def __str__(self):
         return f"{self.visit} → {self.user}"

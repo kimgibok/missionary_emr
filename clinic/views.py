@@ -1,7 +1,7 @@
 from datetime import date
 
 from django.db import transaction
-from django.db.models import Count, Q
+from django.db.models import Count, F, Q
 from rest_framework import generics, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -132,9 +132,10 @@ class DoctorWaitCountsView(APIView):
     
 
 # 의사 배정
+from django.shortcuts import get_object_or_404
 from rest_framework.exceptions import PermissionDenied
 
-from .permissions import IsClinicalTeam, IsReceptionOrClinicalTeam, IsPrescriptionOwner, owns_visit_department, can_add_assignment, CanCancelAssignment
+from .permissions import IsClinicalTeam, IsReceptionOrClinicalTeam, IsPrescriptionOwner, owns_visit_department, can_add_assignment, CanCancelAssignment, IsAssignedDoctor, is_assigned_to_visit
 from .serializers import (
     VisitDepartmentListSerializer, VisitDepartmentDetailSerializer, VisitDepartmentDoneSerializer, VisitDepartmentCreateSerializer,
 )
@@ -174,8 +175,11 @@ class VisitDepartmentListCreateView(generics.ListCreateAPIView):
             .select_related('visit__patient')
         )
         is_done = self.request.query_params.get('is_done')
+        if is_done is not None and is_done.lower() == 'true':
+            # 진료 완료 목록: 완료 시각 최신순 (완료 시각이 없는 옛 기록은 맨 아래)
+            return qs.filter(is_done=True).order_by(F('done_at').desc(nulls_last=True), '-visit__reg_no')
         if is_done is not None:
-            qs = qs.filter(is_done=(is_done.lower() == 'true'))
+            qs = qs.filter(is_done=False)
         return qs.order_by('visit__reg_no')
 
     def perform_create(self, serializer):
@@ -185,13 +189,13 @@ class VisitDepartmentListCreateView(generics.ListCreateAPIView):
 
 
 class VisitDepartmentDetailView(generics.RetrieveUpdateDestroyAPIView):
-    """GET/PATCH: 진료팀 상세조회·진료완료 / DELETE: 의사 배정 취소 (접수팀 전부, 진료팀은 본인이 한 배정만)"""
+    """GET/PATCH: 진료팀 상세조회·진료완료·완료취소 (본인 배정만) / DELETE: 의사 배정 취소 (접수팀 전부, 진료팀은 본인이 한 배정만)"""
     queryset = VisitDepartment.objects.select_related('visit__patient')
 
     def get_permissions(self):
         if self.request.method == 'DELETE':
             return [IsReceptionOrClinicalTeam(), CanCancelAssignment()]
-        return [IsClinicalTeam()]
+        return [IsClinicalTeam(), IsAssignedDoctor()]
 
     def get_serializer_class(self):
         if self.request.method in ('PATCH', 'PUT'):
@@ -215,7 +219,11 @@ from .serializers import (
 
 
 class PrescriptionListCreateView(generics.ListCreateAPIView):
-    """GET: 같은 배정 건의 처방 목록 / POST: 새 처방 작성"""
+    """
+    GET ?visit_department=<id>: 내 배정 건의 처방 목록 (본인 배정만)
+    GET ?visit=<id>: 같은 환자를 본 다른 의사의 처방 - 진료 완료된 배정만, 그 환자에게 배정된 의사만 (중복 처방 확인용)
+    POST: 새 처방 작성
+    """
     permission_classes = [IsClinicalTeam]
 
     def get_serializer_class(self):
@@ -224,21 +232,36 @@ class PrescriptionListCreateView(generics.ListCreateAPIView):
         return PrescriptionListSerializer
 
     def get_queryset(self):
+        user = self.request.user
+        qs = Prescription.objects.select_related('department').prefetch_related('items__drug__cat1').order_by('id')
+
+        visit_id = self.request.query_params.get('visit')
+        if visit_id:
+            if not is_assigned_to_visit(user, visit_id):
+                raise PermissionDenied('본인에게 배정된 환자의 처방만 볼 수 있습니다.')
+            return qs.filter(visit_department__visit_id=visit_id, visit_department__is_done=True)
+
         visit_department_id = self.request.query_params.get('visit_department')
         if not visit_department_id:
             return Prescription.objects.none()
-        return Prescription.objects.filter(
-            visit_department_id=visit_department_id
-        ).select_related('department').prefetch_related('items__drug__cat1')
+        visit_department = get_object_or_404(VisitDepartment, pk=visit_department_id)
+        if not owns_visit_department(user, visit_department):
+            raise PermissionDenied('본인 배정의 처방만 볼 수 있습니다.')
+        return qs.filter(visit_department=visit_department)
 
     def perform_create(self, serializer):
-        if not owns_visit_department(self.request.user, serializer.validated_data['visit_department']):
+        visit_department = serializer.validated_data['visit_department']
+        if not owns_visit_department(self.request.user, visit_department):
             raise PermissionDenied('본인에게 배정된 환자에게만 처방을 작성할 수 있습니다.')
+        if visit_department.is_done:
+            raise ValidationError({'detail': '진료 완료된 환자에게는 처방을 추가할 수 없습니다. [완료 취소] 후 작성하세요.'})
         serializer.save()
 
 
-def check_not_dispensed(prescription):
-    """약국에서 이미 수령 처리된 처방은 진료팀이 고칠 수 없다"""
+def check_prescription_editable(prescription):
+    """진료 완료된 배정의 처방이나 약국에서 이미 수령 처리된 처방은 진료팀이 고칠 수 없다"""
+    if prescription.visit_department.is_done:
+        raise ValidationError({'detail': '진료 완료된 처방은 수정할 수 없습니다. [완료 취소] 후 수정하세요.'})
     if prescription.is_dispensed:
         raise ValidationError({'detail': '약국에서 이미 수령 처리된 처방은 수정할 수 없습니다.'})
 
@@ -250,11 +273,11 @@ class PrescriptionDetailView(generics.UpdateAPIView, generics.DestroyAPIView):
     permission_classes = [IsClinicalTeam, IsPrescriptionOwner]
 
     def perform_update(self, serializer):
-        check_not_dispensed(serializer.instance)
+        check_prescription_editable(serializer.instance)
         serializer.save()
 
     def perform_destroy(self, instance):
-        check_not_dispensed(instance)
+        check_prescription_editable(instance)
         instance.delete()
 
 
@@ -267,7 +290,7 @@ class PrescriptionDrugCreateView(generics.CreateAPIView):
         prescription = serializer.validated_data['prescription']
         if not owns_visit_department(self.request.user, prescription.visit_department):
             raise PermissionDenied('본인이 작성한 처방에만 약을 추가할 수 있습니다.')
-        check_not_dispensed(prescription)
+        check_prescription_editable(prescription)
         serializer.save()
 
 
@@ -447,11 +470,11 @@ class PrescriptionDrugClinicalUpdateView(generics.UpdateAPIView, generics.Destro
     permission_classes = [IsClinicalTeam, IsPrescriptionOwner]
 
     def perform_update(self, serializer):
-        check_not_dispensed(serializer.instance.prescription)
+        check_prescription_editable(serializer.instance.prescription)
         serializer.save()
 
     def perform_destroy(self, instance):
-        check_not_dispensed(instance.prescription)
+        check_prescription_editable(instance.prescription)
         instance.delete()
     
     
