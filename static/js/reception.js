@@ -108,11 +108,16 @@ function renderLists() {
 // 접수 카드를 지금 열려 있는 환자 바로 아래에 붙임
 function placeIntakeCard() {
     if (!currentVisit) {
+        byId('panel-dock').appendChild(intakeCard);
         intakeCard.hidden = true;
         return;
     }
     const item = document.querySelector(`.queue-item[data-visit-id="${currentVisit.id}"]`);
-    if (item) item.after(intakeCard);   // 목록에서 사라진 경우(다른 기기에서 처리 등)엔 맨 아래에 둠
+    if (item) {
+        item.after(intakeCard);
+    } else {
+        byId('panel-dock').appendChild(intakeCard);
+    }
     intakeCard.hidden = false;
 }
 
