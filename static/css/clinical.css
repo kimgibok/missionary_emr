@@ -226,6 +226,19 @@ textarea.field-input {
     padding: 6px 8px;
 }
 
+/* 복용스케줄 ↔ 수량 직접 입력 전환 */
+.rx-cart-toggle {
+    margin-top: 8px;
+    padding: 6px 8px;
+    font-size: 13px;
+    color: var(--color-accent);
+}
+
+/* 목록 영역 안의 오류 문구 (검색 실패 등) */
+.empty-text.is-error {
+    color: var(--color-danger);
+}
+
 .rx-cart-fields {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));

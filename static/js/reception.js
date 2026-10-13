@@ -14,46 +14,10 @@ let isDirty = false;               // 입력 중인 내용이 있는지
 let isBusy = false;                // 저장/취소 요청 중이면 자동 새로고침을 잠시 멈춤
 
 const REFRESH_MS = 10000;
-const intakeCard = document.getElementById('intake-card');
+const intakeCard = byId('intake-card');
 let renderPending = false;         // 입력 중이라 목록 갱신을 미뤄둔 상태
 
-// ----- 도우미 -----
-function escapeHtml(value) {
-    return String(value ?? '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}
-
-function sexLabel(sex) {
-    return sex === 'F' ? '여' : '남';
-}
-
-function calcAge(visitDate, birthYear) {
-    return Number(visitDate.slice(0, 4)) - birthYear;
-}
-
-function patientMeta(visit) {
-    const p = visit.patient;
-    const parts = [
-        sexLabel(p.sex),
-        `${p.birth_year}년생 (${calcAge(visit.visit_date, p.birth_year)}세)`,
-    ];
-    if (p.name_local) parts.push(p.name_local);
-    return parts.join(' · ');
-}
-
-let toastTimer = null;
-function showToast(message, isError = false) {
-    const el = document.getElementById('toast');
-    el.textContent = message;
-    el.classList.toggle('error', isError);
-    el.classList.add('show');
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => el.classList.remove('show'), 2800);
-}
+// escapeHtml, patientMeta, showToast, byId 등은 common.js
 
 // ----- 목록 그리기 -----
 function renderQueueItem(visit, showDoctors) {
@@ -65,7 +29,7 @@ function renderQueueItem(visit, showDoctors) {
             ? '<span class="doctor-tag unassigned">의사 미배정</span>'
             : visit.assignments.map(a => `
                 <span class="doctor-tag${a.is_done ? '' : ' waiting'}">
-                    ${doctorDisplayName(a.doctor_name, a.department_code)} · ${a.is_done ? '진료 완료' : '대기'}
+                    ${doctorLabel(a.doctor_name, a.department_code)} · ${a.is_done ? '진료 완료' : '대기'}
                 </span>`).join('');
         doctorsHtml = `<span class="queue-item-doctors">${tags}</span>`;
     }
@@ -82,8 +46,8 @@ function renderQueueItem(visit, showDoctors) {
 }
 
 function renderList(listId, badgeId, data, showDoctors, emptyText) {
-    document.getElementById(badgeId).textContent = `${data.count}명`;
-    const el = document.getElementById(listId);
+    byId(badgeId).textContent = `${data.count}명`;
+    const el = byId(listId);
 
     if (data.results.length === 0) {
         el.innerHTML = `<p class="empty-text">${emptyText}</p>`;
@@ -191,10 +155,7 @@ refreshAll(true);
 
 // =====================================================
 // 접수팀 페이지 - 2부: 접수 폼, 의사 배정, 환자 정보 수정
-// (1부 파일 맨 아래에 이어서 붙여넣기)
 // =====================================================
-
-const byId = (id) => document.getElementById(id);
 
 let submitLabel = '저장 및 배정';   // 새 접수면 '저장 및 배정', 이미 접수된 기록이면 '수정 저장'
 
@@ -220,10 +181,6 @@ function getNum(id, parse) {
 function doctorName(id) {
     const d = doctors.find((x) => x.doctor_id === id);
     return d ? d.doctor_name : `의사 #${id}`;
-}
-
-function doctorDisplayName(name, deptCode) {
-    return deptCode ? `${escapeHtml(deptCode)} · ${escapeHtml(name)}` : escapeHtml(name);
 }
 
 function fillPatientHeader(v) {
@@ -308,7 +265,7 @@ function assignedOptionHtml(a) {
         : '';
     return `
         <div class="doctor-option assigned">
-            <span class="doctor-option-name">${doctorDisplayName(a.doctor_name, a.department_code)}</span>
+            <span class="doctor-option-name">${doctorLabel(a.doctor_name, a.department_code)}</span>
             <span class="doctor-option-side">
                 <span class="doctor-tag${a.is_done ? '' : ' waiting'}">${a.is_done ? '진료 완료' : '배정됨'}</span>
                 ${cancelBtn}
@@ -335,7 +292,7 @@ function renderDoctorPicker() {
             parts.push(`
                 <label class="doctor-option">
                     <input type="checkbox" data-doctor-id="${d.doctor_id}"${pendingDoctorIds.has(d.doctor_id) ? ' checked' : ''}${readOnly ? ' disabled' : ''}>
-                    <span class="doctor-option-name">${doctorDisplayName(d.doctor_name, d.department_code)}</span>
+                    <span class="doctor-option-name">${doctorLabel(d.doctor_name, d.department_code)}</span>
                     <span class="doctor-option-wait">${d.waiting_count}명 대기</span>
                 </label>`);
         }
