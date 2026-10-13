@@ -1,15 +1,33 @@
 from datetime import date
 
 from django.db import transaction
-from django.db.models import Count, Q
+from django.db.models import Count, F, Q, Sum
+from django.shortcuts import get_object_or_404
 from rest_framework import generics, status
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Patient, Visit, VisitDepartment, MissionMembership
-from .permissions import IsInfoTeam, IsReceptionTeam, IsInfoOrReceptionTeam, get_active_memberships
+from .models import (
+    Patient, Visit, VisitDepartment, MissionMembership, Department, DrugCategory1, DrugCategory2,
+    Prescription, PrescriptionDrug, MissionStock,
+)
+from .permissions import (
+    get_active_memberships,
+    IsReceptionTeam, IsClinicalTeam, IsPharmacyTeam,
+    IsInfoOrReceptionTeam, IsReceptionOrClinicalTeam, IsInfoOrReceptionOrClinicalTeam, IsClinicalOrPharmacyTeam,
+    IsAssignedDoctor, IsPrescriptionOwner, CanCancelAssignment,
+    can_add_assignment, owns_visit_department, is_assigned_to_visit,
+)
 from .serializers import (
-    PatientSerializer, VisitCreateSerializer, VisitListSerializer, VisitVitalsSerializer, VisitIntakeListSerializer, VisitIntakeDetailSerializer,
+    PatientSerializer,
+    VisitCreateSerializer, VisitVitalsSerializer, VisitIntakeListSerializer, VisitIntakeDetailSerializer,
+    VisitDepartmentCreateSerializer, VisitDepartmentListSerializer, VisitDepartmentDetailSerializer,
+    VisitDepartmentDoneSerializer,
+    DepartmentSerializer, DrugCategory1ReadSerializer, DrugCategory2ReadSerializer, DrugSearchSerializer,
+    PrescriptionCreateSerializer, PrescriptionListSerializer, PrescriptionUpdateSerializer,
+    PrescriptionDrugCreateSerializer, PrescriptionDrugClinicalUpdateSerializer, PrescriptionDrugUpdateSerializer,
+    MissionStockSerializer, PharmacyQueueSerializer,
 )
 
 
@@ -19,7 +37,12 @@ def get_current_mission(user):
     return membership.mission if membership else None
 
 
+# =====================================================
+# 환자 / 방문 (안내팀·접수팀, 일부 진료팀 공용)
+# =====================================================
+
 class PatientListCreateView(generics.ListCreateAPIView):
+    """환자 검색(?search=&scope=current_mission) / 신규 등록 - 안내팀·접수팀"""
     serializer_class = PatientSerializer
     permission_classes = [IsInfoOrReceptionTeam]
 
@@ -37,8 +60,15 @@ class PatientListCreateView(generics.ListCreateAPIView):
         return qs
 
 
+class PatientDetailView(generics.RetrieveUpdateAPIView):
+    """환자 기본정보 조회/수정 - 안내팀·접수팀·진료팀 공용"""
+    queryset = Patient.objects.all()
+    serializer_class = PatientSerializer
+    permission_classes = [IsInfoOrReceptionOrClinicalTeam]
+
+
 class VisitListCreateView(generics.ListCreateAPIView):
-    """GET: 접수팀 대기리스트 / POST: 안내팀 방문등록"""
+    """GET: 접수팀 대기/완료 리스트 / POST: 안내팀 방문등록(등록번호 자동 발급)"""
 
     def get_serializer_class(self):
         if self.request.method == 'POST':
@@ -96,9 +126,24 @@ class VisitListCreateView(generics.ListCreateAPIView):
         return Response(VisitCreateSerializer(visit).data, status=status.HTTP_201_CREATED)
 
 
+class VisitVitalsUpdateView(generics.RetrieveUpdateAPIView):
+    """접수팀·진료팀 공용 - 접수 기록 조회 + vitals/병력 입력·수정"""
+    queryset = Visit.objects.select_related('patient').prefetch_related('visit_departments__user__primary_department')
+    permission_classes = [IsReceptionOrClinicalTeam]
+
+    def get_serializer_class(self):
+        if self.request.method in ('PATCH', 'PUT'):
+            return VisitVitalsSerializer
+        return VisitIntakeDetailSerializer
+
+
+# =====================================================
+# 의사 배정 (접수팀 배정 · 진료팀 전과/진료 완료)
+# =====================================================
+
 class DoctorWaitCountsView(APIView):
-    """이번 미션의 진료팀 의사 전원 + 각자의 대기 인원 (대기 0명인 의사도 포함)"""
-    permission_classes = [IsInfoOrReceptionTeam]
+    """이번 미션의 진료팀 의사 전원 + 각자의 오늘 대기 인원 (대기 0명 포함) - 안내·접수팀 번호표, 진료팀 전과 모달"""
+    permission_classes = [IsInfoOrReceptionOrClinicalTeam]
 
     def get(self, request):
         mission = get_current_mission(request.user)
@@ -127,33 +172,14 @@ class DoctorWaitCountsView(APIView):
             }
             for m in doctors
         ])
-        
-    
 
-# 의사 배정
-from .permissions import IsClinicalTeam, IsReceptionOrClinicalTeam, IsInfoOrReceptionOrClinicalTeam
-from .serializers import (
-    VisitDepartmentListSerializer, VisitDepartmentDetailSerializer, VisitDepartmentDoneSerializer, VisitDepartmentCreateSerializer,
-)
-
-class VisitVitalsUpdateView(generics.RetrieveUpdateAPIView):
-    """접수팀·진료팀 공용 - 접수 기록 조회 + vitals/병력 입력·수정"""
-    queryset = Visit.objects.select_related('patient').prefetch_related('visit_departments__user__primary_department')
-    permission_classes = [IsReceptionOrClinicalTeam]
-
-    def get_serializer_class(self):
-        if self.request.method in ('PATCH', 'PUT'):
-            return VisitVitalsSerializer
-        return VisitIntakeDetailSerializer
-
-class PatientDetailView(generics.RetrieveUpdateAPIView):
-    """환자 기본정보 조회/수정 - 안내팀·접수팀 공용"""
-    queryset = Patient.objects.all()
-    serializer_class = PatientSerializer
-    permission_classes = [IsInfoOrReceptionOrClinicalTeam]
 
 class VisitDepartmentListCreateView(generics.ListCreateAPIView):
-    """GET: 진료팀 내 배정목록 / POST: 접수팀 배정 + 진료팀 전과(추가배정) 공용"""
+    """
+    GET: 진료팀 내 배정 목록 (오늘만)
+        ?is_done=false → 등록번호 순 / ?is_done=true → 완료 시각 최신순
+    POST: 접수팀 배정 + 진료팀 전과(추가 배정) 공용, 배정한 사람(assigned_by) 기록
+    """
 
     def get_serializer_class(self):
         if self.request.method == 'POST':
@@ -166,21 +192,38 @@ class VisitDepartmentListCreateView(generics.ListCreateAPIView):
         return [IsClinicalTeam()]
 
     def get_queryset(self):
-        qs = VisitDepartment.objects.filter(user=self.request.user).select_related('visit__patient')
-        is_done = self.request.query_params.get('is_done')
-        if is_done is not None:
-            qs = qs.filter(is_done=(is_done.lower() == 'true'))
-        return qs.order_by('assigned_at')
+        qs = (
+            VisitDepartment.objects.filter(user=self.request.user, visit__visit_date=date.today())
+            .select_related('visit__patient')
+        )
+        is_done = self.request.query_params.get('is_done', '').lower()
+        if is_done == 'true':
+            # 완료 시각이 없는 옛 기록은 맨 아래
+            return qs.filter(is_done=True).order_by(F('done_at').desc(nulls_last=True), '-visit__reg_no')
+        if is_done:
+            qs = qs.filter(is_done=False)
+        return qs.order_by('visit__reg_no')
+
+    def perform_create(self, serializer):
+        if not can_add_assignment(self.request.user, serializer.validated_data['visit']):
+            raise PermissionDenied('본인이 진료 중(완료 전)인 환자에게만 다른 의사를 추가 배정할 수 있습니다.')
+        serializer.save(assigned_by=self.request.user)
 
 
 class VisitDepartmentDetailView(generics.RetrieveUpdateDestroyAPIView):
-    """GET/PATCH: 진료팀 상세조회·진료완료 / DELETE: 접수팀의 의사 배정 취소"""
-    queryset = VisitDepartment.objects.select_related('visit__patient')
+    """
+    GET/PATCH: 진료 상세 조회 · 진료 완료/완료 취소 (본인 배정만)
+    DELETE: 의사 배정 취소 (접수팀은 전부, 진료팀은 본인이 한 배정만 / 진료 전인 배정만)
+    """
+    queryset = (
+        VisitDepartment.objects.select_related('visit__patient')
+        .prefetch_related('visit__visit_departments__user__primary_department')
+    )
 
     def get_permissions(self):
         if self.request.method == 'DELETE':
-            return [IsReceptionTeam()]
-        return [IsClinicalTeam()]
+            return [IsReceptionOrClinicalTeam(), CanCancelAssignment()]
+        return [IsClinicalTeam(), IsAssignedDoctor()]
 
     def get_serializer_class(self):
         if self.request.method in ('PATCH', 'PUT'):
@@ -195,27 +238,31 @@ class VisitDepartmentDetailView(generics.RetrieveUpdateDestroyAPIView):
         instance.delete()
 
 
-# 처방관련
-from .models import Prescription, PrescriptionDrug, MissionStock
-from .serializers import (
-    PrescriptionCreateSerializer, PrescriptionDrugCreateSerializer, DrugSearchSerializer,
-)
+# =====================================================
+# 진료팀 - 조회용 마스터 / 약 검색
+# =====================================================
 
-
-class PrescriptionCreateView(generics.CreateAPIView):
-    queryset = Prescription.objects.all()
-    serializer_class = PrescriptionCreateSerializer
+class DepartmentListView(generics.ListAPIView):
+    """진료과 목록 - 처방 작성 시 선택지"""
+    queryset = Department.objects.all().order_by('name')
+    serializer_class = DepartmentSerializer
     permission_classes = [IsClinicalTeam]
 
 
-class PrescriptionDrugCreateView(generics.CreateAPIView):
-    queryset = PrescriptionDrug.objects.all()
-    serializer_class = PrescriptionDrugCreateSerializer
-    permission_classes = [IsClinicalTeam]
+class DrugCategory1ListView(generics.ListAPIView):
+    queryset = DrugCategory1.objects.all().order_by('name')
+    serializer_class = DrugCategory1ReadSerializer
+    permission_classes = [IsClinicalOrPharmacyTeam]
+
+
+class DrugCategory2ListView(generics.ListAPIView):
+    queryset = DrugCategory2.objects.all().order_by('name')
+    serializer_class = DrugCategory2ReadSerializer
+    permission_classes = [IsClinicalOrPharmacyTeam]
 
 
 class DrugSearchView(generics.ListAPIView):
-    """진료팀 처방약 검색 - 현재 미션의 missionstock 기준"""
+    """진료팀 처방약 검색 - 현재 미션의 MissionStock 기준 (?search=&cat1=&cat2=)"""
     serializer_class = DrugSearchSerializer
     permission_classes = [IsClinicalTeam]
 
@@ -240,19 +287,110 @@ class DrugSearchView(generics.ListAPIView):
                 Q(drugbatch__drug__ingredient__icontains=search)
             )
         return qs
-    
 
-## 약국팀  
-from django.db.models import Sum
-from django.db.models.functions import TruncDate
 
-from .models import Prescription, PrescriptionDrug, MissionStock
-from .permissions import IsPharmacyTeam
-from .serializers import MissionStockSerializer, PharmacyQueueSerializer, PrescriptionDrugUpdateSerializer
+# =====================================================
+# 진료팀 - 처방 작성·조회·수정
+# =====================================================
 
+def check_prescription_editable(prescription):
+    """진료 완료된 배정의 처방이나 약국에서 이미 수령 처리된 처방은 진료팀이 고칠 수 없다"""
+    if prescription.visit_department.is_done:
+        raise ValidationError({'detail': '진료 완료된 처방은 수정할 수 없습니다. [완료 취소] 후 수정하세요.'})
+    if prescription.is_dispensed:
+        raise ValidationError({'detail': '약국에서 이미 수령 처리된 처방은 수정할 수 없습니다.'})
+
+
+class PrescriptionListCreateView(generics.ListCreateAPIView):
+    """
+    GET ?visit_department=<id>: 내 배정 건의 처방 목록 (본인 배정만)
+    GET ?visit=<id>: 같은 환자를 본 다른 의사의 처방 - 진료 완료된 배정만, 그 환자에게 배정된 의사만 (중복 처방 확인용)
+    POST: 새 처방 작성 (본인 배정, 진료 완료 전만)
+    """
+    permission_classes = [IsClinicalTeam]
+
+    def get_serializer_class(self):
+        if self.request.method == 'POST':
+            return PrescriptionCreateSerializer
+        return PrescriptionListSerializer
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = Prescription.objects.select_related('department').prefetch_related('items__drug__cat1').order_by('id')
+
+        visit_id = self.request.query_params.get('visit')
+        if visit_id:
+            if not is_assigned_to_visit(user, visit_id):
+                raise PermissionDenied('본인에게 배정된 환자의 처방만 볼 수 있습니다.')
+            return qs.filter(visit_department__visit_id=visit_id, visit_department__is_done=True)
+
+        visit_department_id = self.request.query_params.get('visit_department')
+        if not visit_department_id:
+            return Prescription.objects.none()
+        visit_department = get_object_or_404(VisitDepartment, pk=visit_department_id)
+        if not owns_visit_department(user, visit_department):
+            raise PermissionDenied('본인 배정의 처방만 볼 수 있습니다.')
+        return qs.filter(visit_department=visit_department)
+
+    def perform_create(self, serializer):
+        visit_department = serializer.validated_data['visit_department']
+        if not owns_visit_department(self.request.user, visit_department):
+            raise PermissionDenied('본인에게 배정된 환자에게만 처방을 작성할 수 있습니다.')
+        if visit_department.is_done:
+            raise ValidationError({'detail': '진료 완료된 환자에게는 처방을 추가할 수 없습니다. [완료 취소] 후 작성하세요.'})
+        serializer.save()
+
+
+class PrescriptionDetailView(generics.UpdateAPIView, generics.DestroyAPIView):
+    """진료팀 - 처방의 진료과·진료내용 수정 / 처방 통째로 삭제(처방약도 같이 삭제됨)"""
+    queryset = Prescription.objects.select_related('visit_department')
+    serializer_class = PrescriptionUpdateSerializer
+    permission_classes = [IsClinicalTeam, IsPrescriptionOwner]
+
+    def perform_update(self, serializer):
+        check_prescription_editable(serializer.instance)
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        check_prescription_editable(instance)
+        instance.delete()
+
+
+class PrescriptionDrugCreateView(generics.CreateAPIView):
+    """진료팀 - 처방에 약 추가 (본인 처방, 수정 가능한 상태일 때만)"""
+    queryset = PrescriptionDrug.objects.all()
+    serializer_class = PrescriptionDrugCreateSerializer
+    permission_classes = [IsClinicalTeam]
+
+    def perform_create(self, serializer):
+        prescription = serializer.validated_data['prescription']
+        if not owns_visit_department(self.request.user, prescription.visit_department):
+            raise PermissionDenied('본인이 작성한 처방에만 약을 추가할 수 있습니다.')
+        check_prescription_editable(prescription)
+        serializer.save()
+
+
+class PrescriptionDrugClinicalUpdateView(generics.UpdateAPIView, generics.DestroyAPIView):
+    """진료팀 - 처방약 수정(1회량×횟수×일수가 있으면 수량 재계산됨) / 삭제"""
+    queryset = PrescriptionDrug.objects.select_related('prescription__visit_department')
+    serializer_class = PrescriptionDrugClinicalUpdateSerializer
+    permission_classes = [IsClinicalTeam, IsPrescriptionOwner]
+
+    def perform_update(self, serializer):
+        check_prescription_editable(serializer.instance.prescription)
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        check_prescription_editable(instance.prescription)
+        instance.delete()
+
+
+# =====================================================
+# 약국팀
+# =====================================================
 
 class MissionStockListView(generics.ListAPIView):
-    """약국팀 재고조회 + 진료팀 처방약검색과 별개로, 약국팀 화면용 (동일 데이터, 시리얼라이저만 다름)"""
+    """약국팀 재고 조회 - 현재 미션의 MissionStock (?search=)"""
     serializer_class = MissionStockSerializer
     permission_classes = [IsPharmacyTeam]
 
@@ -269,6 +407,7 @@ class MissionStockListView(generics.ListAPIView):
 
 
 class DailyDrugStatsView(APIView):
+    """약국팀 일별 약품 사용 통계 (?date=YYYY-MM-DD, 기본 오늘)"""
     permission_classes = [IsPharmacyTeam]
 
     def get(self, request):
@@ -294,7 +433,7 @@ class DailyDrugStatsView(APIView):
 
 
 class PharmacyQueueView(generics.ListAPIView):
-    """환자 단위 처방대기리스트 - 배정된 모든 visitdepartment가 완료되고, 미수령 처방이 있는 visit만"""
+    """환자 단위 처방 대기 리스트 - 배정된 모든 VisitDepartment가 완료되고, 미수령 처방이 있는 방문만"""
     serializer_class = PharmacyQueueSerializer
     permission_classes = [IsPharmacyTeam]
 
@@ -306,10 +445,6 @@ class PharmacyQueueView(generics.ListAPIView):
         qs = Visit.objects.filter(mission=mission).exclude(visit_departments__is_done=False)
         qs = qs.filter(visit_departments__prescriptions__is_dispensed=False).distinct()
         return qs.select_related('patient')
-    
-
-## 배차 선택지  조회 + 수령처리
-from rest_framework.exceptions import ValidationError
 
 
 class DispenseOptionsView(APIView):
@@ -375,10 +510,10 @@ class DispenseView(APIView):
             ).update(is_dispensed=True)
 
         return Response({'detail': '수령 처리가 완료되었습니다.'})
-    
-    
+
+
 class PrescriptionDrugUpdateView(generics.UpdateAPIView):
-    """약국팀 - 조제 중 재고불일치로 약품/수량 변경 필요 시"""
+    """약국팀 - 조제 중 재고 불일치로 약품/수량 변경 (수량을 그대로 믿고 재계산하지 않음)"""
     queryset = PrescriptionDrug.objects.all()
-    serializer_class = PrescriptionDrugUpdateSerializer   # 이 줄만 변경
+    serializer_class = PrescriptionDrugUpdateSerializer
     permission_classes = [IsPharmacyTeam]

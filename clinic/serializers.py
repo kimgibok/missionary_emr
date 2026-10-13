@@ -1,7 +1,15 @@
+from django.utils import timezone
 from rest_framework import serializers
 
-from .models import Patient, Visit, VisitDepartment
+from .models import (
+    Patient, Visit, VisitDepartment, Department, DrugCategory1, DrugCategory2,
+    Prescription, PrescriptionDrug, MissionStock,
+)
 
+
+# =====================================================
+# 환자 / 방문
+# =====================================================
 
 class PatientSerializer(serializers.ModelSerializer):
     class Meta:
@@ -26,29 +34,6 @@ class VisitListSerializer(serializers.ModelSerializer):
         fields = ['id', 'reg_no', 'visit_date', 'patient']
 
 
-class VisitVitalsSerializer(serializers.ModelSerializer):
-    """접수팀·진료팀 - vitals/병력 입력·수정용. weight는 여기서 다루지 않음."""
-    class Meta:
-        model = Visit
-        fields = [
-            'id', 'bp', 'pr', 'bt', 'bst', 'is_preg',
-            'has_htn', 'has_dm', 'has_tbc', 'has_hepatitis',
-            'has_allergy', 'allergy_detail',
-            'has_operation', 'operation_detail',
-            'history_etc', 'chief_complaint', 'symptom_duration',
-        ]
-        read_only_fields = ['id']
-        extra_kwargs = {'chief_complaint': {'allow_blank': False}}
-
-
-class VisitDepartmentCreateSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = VisitDepartment
-        fields = ['id', 'visit', 'user']
-        read_only_fields = ['id']
-        
-
-## 진료팀이 확인할 데이터 serializer
 class VisitDetailSerializer(serializers.ModelSerializer):
     """진료 상세화면 - vitals/병력 전체 포함"""
     patient = PatientSerializer(read_only=True)
@@ -65,18 +50,84 @@ class VisitDetailSerializer(serializers.ModelSerializer):
         ]
 
 
+class VisitVitalsSerializer(serializers.ModelSerializer):
+    """접수팀·진료팀 - vitals/병력 입력·수정용. weight는 여기서 다루지 않음."""
+    class Meta:
+        model = Visit
+        fields = [
+            'id', 'bp', 'pr', 'bt', 'bst', 'is_preg',
+            'has_htn', 'has_dm', 'has_tbc', 'has_hepatitis',
+            'has_allergy', 'allergy_detail',
+            'has_operation', 'operation_detail',
+            'history_etc', 'chief_complaint', 'symptom_duration',
+        ]
+        read_only_fields = ['id']
+        extra_kwargs = {'chief_complaint': {'allow_blank': False}}
+
+
+class VisitAssignmentSerializer(serializers.ModelSerializer):
+    """방문에 배정된 의사 한 명의 요약 (접수 리스트/상세, 진료 상세의 '다른 의사 배정 현황')"""
+    doctor_id = serializers.IntegerField(source='user_id', read_only=True)
+    doctor_name = serializers.SerializerMethodField()
+    department_code = serializers.SerializerMethodField()
+
+    class Meta:
+        model = VisitDepartment
+        fields = ['id', 'doctor_id', 'doctor_name', 'department_code', 'is_done', 'assigned_by']
+
+    def get_doctor_name(self, obj):
+        return obj.user.name or obj.user.username
+
+    def get_department_code(self, obj):
+        return obj.user.primary_department.name if obj.user.primary_department else None
+
+
+class VisitIntakeListSerializer(VisitListSerializer):
+    """접수팀 리스트용 - 배정된 의사 요약 포함"""
+    assignments = VisitAssignmentSerializer(source='visit_departments', many=True, read_only=True)
+
+    class Meta(VisitListSerializer.Meta):
+        fields = VisitListSerializer.Meta.fields + ['assignments']
+
+
+class VisitIntakeDetailSerializer(VisitDetailSerializer):
+    """접수 기록 열람용 - vitals/병력 전체 + 배정된 의사 요약"""
+    assignments = VisitAssignmentSerializer(source='visit_departments', many=True, read_only=True)
+
+    class Meta(VisitDetailSerializer.Meta):
+        fields = VisitDetailSerializer.Meta.fields + ['assignments']
+
+
+# =====================================================
+# 의사 배정
+# =====================================================
+
+class VisitDepartmentCreateSerializer(serializers.ModelSerializer):
+    """접수팀 배정 · 진료팀 전과 공용"""
+    class Meta:
+        model = VisitDepartment
+        fields = ['id', 'visit', 'user']
+        read_only_fields = ['id']
+
+    def validate(self, attrs):
+        # 같은 방문에 같은 의사를 두 번 배정하지 않는다
+        if VisitDepartment.objects.filter(visit=attrs['visit'], user=attrs['user']).exists():
+            raise serializers.ValidationError({'detail': '이미 이 환자에게 배정된 의사입니다.'})
+        return attrs
+
+
 class VisitDepartmentListSerializer(serializers.ModelSerializer):
     """진료팀 - 내 배정 목록"""
     visit = VisitListSerializer(read_only=True)
 
     class Meta:
         model = VisitDepartment
-        fields = ['id', 'visit', 'assigned_at', 'is_done']
+        fields = ['id', 'visit', 'assigned_at', 'is_done', 'done_at']
 
 
 class VisitDepartmentDetailSerializer(serializers.ModelSerializer):
-    """진료팀 - 진료 상세 조회 (환자+vitals+병력 nested)"""
-    visit = VisitDetailSerializer(read_only=True)
+    """진료팀 - 진료 상세 조회 (환자+vitals+병력+배정 현황 nested)"""
+    visit = VisitIntakeDetailSerializer(read_only=True)
 
     class Meta:
         model = VisitDepartment
@@ -84,21 +135,106 @@ class VisitDepartmentDetailSerializer(serializers.ModelSerializer):
 
 
 class VisitDepartmentDoneSerializer(serializers.ModelSerializer):
-    """진료 완료 처리용"""
+    """진료 완료 처리 / 완료 취소용"""
     class Meta:
         model = VisitDepartment
         fields = ['id', 'is_done']
         read_only_fields = ['id']
-        
-## 진료팀 - 처방 관련 serializer
-from .models import Prescription, PrescriptionDrug, MissionStock
 
+    def validate(self, attrs):
+        # 오류를 'detail'로 내야 화면에 "is_done: ..." 같은 필드명이 붙지 않는다
+        is_done = attrs.get('is_done')
+        prescriptions = self.instance.prescriptions
+        if is_done and not prescriptions.exists():
+            # 처방이 없으면 약국 대기에 안 나타나므로 완료를 막는다 (약이 없으면 '처방약 없이' 처방을 저장)
+            raise serializers.ValidationError({'detail': '처방을 하나 이상 저장해야 진료를 완료할 수 있습니다.'})
+        if is_done is False and prescriptions.filter(is_dispensed=True).exists():
+            raise serializers.ValidationError({'detail': '약국에서 이미 수령 처리되어 완료를 취소할 수 없습니다.'})
+        return attrs
+
+    def update(self, instance, validated_data):
+        # 완료 시각 기록 (완료 목록 최신순 정렬용), 완료 취소하면 비움
+        if 'is_done' in validated_data:
+            validated_data['done_at'] = timezone.now() if validated_data['is_done'] else None
+        return super().update(instance, validated_data)
+
+
+# =====================================================
+# 진료팀 - 마스터 조회 / 약 검색
+# =====================================================
+
+class DepartmentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Department
+        fields = ['id', 'name']
+
+
+class DrugCategory1ReadSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DrugCategory1
+        fields = ['id', 'name', 'uses_dosage_schedule']
+
+
+class DrugCategory2ReadSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DrugCategory2
+        fields = ['id', 'name']
+
+
+class DrugSearchSerializer(serializers.Serializer):
+    """진료팀 처방약 검색 - MissionStock 기준, drug 정보 nested"""
+    id = serializers.IntegerField()  # mission_stock id
+    drug_id = serializers.IntegerField(source='drugbatch.drug_id')
+    drug_name = serializers.CharField(source='drugbatch.drug.name')
+    ingredient = serializers.CharField(source='drugbatch.drug.ingredient')
+    usage = serializers.CharField(source='drugbatch.drug.usage')
+    cat1 = serializers.IntegerField(source='drugbatch.drug.cat1_id')
+    cat1_name = serializers.CharField(source='drugbatch.drug.cat1.name')
+    uses_dosage_schedule = serializers.BooleanField(source='drugbatch.drug.cat1.uses_dosage_schedule')
+    cat2 = serializers.IntegerField(source='drugbatch.drug.cat2_id')
+    remaining_qty = serializers.IntegerField()
+
+
+# =====================================================
+# 진료팀 - 처방
+# =====================================================
 
 class PrescriptionCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Prescription
         fields = ['id', 'visit_department', 'department', 'clinical_note']
         read_only_fields = ['id']
+
+
+class PrescriptionUpdateSerializer(serializers.ModelSerializer):
+    """진료팀 - 처방의 진료과·진료내용 수정"""
+    class Meta:
+        model = Prescription
+        fields = ['id', 'department', 'clinical_note']
+        read_only_fields = ['id']
+
+
+class PrescriptionDrugClinicalItemSerializer(serializers.ModelSerializer):
+    """진료팀 처방 목록의 약 항목 - 수정 폼을 채우려고 복용스케줄까지 포함"""
+    drug_name = serializers.CharField(source='drug.name', read_only=True)
+    uses_dosage_schedule = serializers.BooleanField(source='drug.cat1.uses_dosage_schedule', read_only=True)
+
+    class Meta:
+        model = PrescriptionDrug
+        fields = [
+            'id', 'drug', 'drug_name', 'uses_dosage_schedule',
+            'dose_per_intake', 'frequency_per_day', 'duration_days', 'quantity',
+        ]
+
+
+class PrescriptionListSerializer(serializers.ModelSerializer):
+    """진료팀 - 내 처방 목록(수정용) / 다른 의사 처방(중복 확인용)"""
+    department_name = serializers.CharField(source='department.name', read_only=True)
+    items = PrescriptionDrugClinicalItemSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Prescription
+        fields = ['id', 'visit_department', 'department', 'department_name', 'clinical_note', 'is_dispensed', 'items']
 
 
 class PrescriptionDrugCreateSerializer(serializers.ModelSerializer):
@@ -112,18 +248,19 @@ class PrescriptionDrugCreateSerializer(serializers.ModelSerializer):
         extra_kwargs = {'quantity': {'required': False}}
 
 
-class DrugSearchSerializer(serializers.Serializer):
-    """진료팀 처방약 검색 - missionstock 기준, drug 정보 nested"""
-    id = serializers.IntegerField()  # mission_stock id
-    drug_name = serializers.CharField(source='drugbatch.drug.name')
-    ingredient = serializers.CharField(source='drugbatch.drug.ingredient')
-    usage = serializers.CharField(source='drugbatch.drug.usage')
-    cat1 = serializers.IntegerField(source='drugbatch.drug.cat1_id')
-    cat2 = serializers.IntegerField(source='drugbatch.drug.cat2_id')
-    remaining_qty = serializers.IntegerField()
-    
-    
-## 약국팀
+class PrescriptionDrugClinicalUpdateSerializer(serializers.ModelSerializer):
+    """진료팀 - 처방약 수정 (약/수량/복용스케줄 전부 변경 가능, save()에서 수량 재계산)"""
+    class Meta:
+        model = PrescriptionDrug
+        fields = ['id', 'prescription', 'drug', 'dose_per_intake', 'frequency_per_day', 'duration_days', 'quantity']
+        read_only_fields = ['id', 'prescription']
+        extra_kwargs = {'quantity': {'required': False}}
+
+
+# =====================================================
+# 약국팀
+# =====================================================
+
 class MissionStockSerializer(serializers.ModelSerializer):
     """약국팀 재고조회 - drugbatch/drug 정보 nested"""
     drug_name = serializers.CharField(source='drugbatch.drug.name', read_only=True)
@@ -171,9 +308,10 @@ class PharmacyQueueSerializer(serializers.ModelSerializer):
             visit_department__visit=obj, is_dispensed=False
         ).select_related('department').prefetch_related('items__drug')
         return PrescriptionWithItemsSerializer(qs, many=True).data
-    
-    
+
+
 class PrescriptionDrugUpdateSerializer(serializers.ModelSerializer):
+    """약국팀 - 처방약 수정. 약국이 조정한 수량을 그대로 믿고 재계산하지 않는다."""
     class Meta:
         model = PrescriptionDrug
         fields = ['id', 'prescription', 'drug', 'dose_per_intake', 'frequency_per_day', 'duration_days', 'quantity']
@@ -182,37 +320,6 @@ class PrescriptionDrugUpdateSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
+        # serializer.save(skip_recalculate=True)로 넘기면 DRF가 데이터로 취급하므로 직접 호출
         instance.save(skip_recalculate=True)
         return instance
-    
-class VisitAssignmentSerializer(serializers.ModelSerializer):
-    """방문에 배정된 의사 한 명의 요약 (접수 완료 리스트/상세에서 사용)"""
-    doctor_id = serializers.IntegerField(source='user_id', read_only=True)
-    doctor_name = serializers.SerializerMethodField()
-    department_code = serializers.SerializerMethodField()
-
-    class Meta:
-        model = VisitDepartment
-        fields = ['id', 'doctor_id', 'doctor_name', 'department_code', 'is_done']
-
-    def get_doctor_name(self, obj):
-        return obj.user.name or obj.user.username
-
-    def get_department_code(self, obj):
-        return obj.user.primary_department.name if obj.user.primary_department else None
-
-
-class VisitIntakeListSerializer(VisitListSerializer):
-    """접수팀 리스트용 - 배정된 의사 요약 포함"""
-    assignments = VisitAssignmentSerializer(source='visit_departments', many=True, read_only=True)
-
-    class Meta(VisitListSerializer.Meta):
-        fields = VisitListSerializer.Meta.fields + ['assignments']
-
-
-class VisitIntakeDetailSerializer(VisitDetailSerializer):
-    """접수 기록 열람용 - vitals/병력 전체 + 배정된 의사 요약"""
-    assignments = VisitAssignmentSerializer(source='visit_departments', many=True, read_only=True)
-
-    class Meta(VisitDetailSerializer.Meta):
-        fields = VisitDetailSerializer.Meta.fields + ['assignments']

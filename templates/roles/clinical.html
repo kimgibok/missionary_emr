@@ -4,19 +4,177 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ 진료팀 }} · 의료선교 EMR</title>
+    <title>진료팀 · 의료선교 EMR</title>
     <link rel="stylesheet" href="{% static 'css/base.css' %}">
     <link rel="stylesheet" href="{% static 'css/nav.css' %}">
     <link rel="stylesheet" href="{% static 'css/page.css' %}">
+    <link rel="stylesheet" href="{% static 'css/modal.css' %}">
+    <link rel="stylesheet" href="{% static 'css/reception.css' %}">
+    <link rel="stylesheet" href="{% static 'css/clinical.css' %}">
 </head>
 <body>
     {% include 'partials/nav.html' %}
     <main class="page-content">
-        <h1>{{ 진료팀 }}</h1>
-        <p style="color: var(--color-text-muted); margin-top: 8px;">준비중입니다.</p>
+        <h1>진료팀</h1>
+
+        <section class="card">
+            <div class="card-head">
+                <h2 class="card-title">진료 대기</h2>
+                <span class="count-badge" id="assign-count">0명</span>
+            </div>
+            <p class="section-hint">나에게 배정된 오늘 환자가 등록번호 순으로 보입니다.</p>
+            <div id="assign-list" class="queue-list"></div>
+        </section>
+
+        <section class="card">
+            <div class="card-head">
+                <h2 class="card-title">오늘 진료 완료</h2>
+                <span class="count-badge" id="done-assign-count">0명</span>
+            </div>
+            <p class="section-hint">최근에 완료한 환자가 위에 보입니다. 눌러서 다시 보거나, 약국 수령 전이면 [완료 취소]할 수 있어요.</p>
+            <div id="done-assign-list" class="queue-list"></div>
+        </section>
+
+        <section class="intake-panel" id="clinical-panel" hidden>
+            <div class="intake-header">
+                <div class="intake-ticket">
+                    <span class="intake-ticket-no ticket-number" id="cl-reg-no"></span>
+                    <span class="intake-ticket-label">등록번호</span>
+                </div>
+                <div class="intake-patient">
+                    <div class="intake-patient-name" id="cl-name"></div>
+                    <div class="intake-patient-meta" id="cl-meta"></div>
+                </div>
+                <div class="intake-actions">
+                    <button class="btn-secondary btn-small" id="cl-edit-patient-btn" type="button">환자 정보 수정</button>
+                    <button class="btn-secondary btn-small" id="cl-close-btn" type="button">닫기</button>
+                </div>
+            </div>
+
+            <div id="cl-other-assignments" class="other-assignments"></div>
+            <p class="readonly-notice" id="cl-readonly-notice" hidden>진료가 완료된 환자입니다. 수정하려면 맨 아래 [완료 취소]를 눌러주세요.</p>
+
+            <h3 class="form-section-title">활력징후 / 병력</h3>
+            <form id="cl-vitals-form">
+                <div class="form-grid compact">
+                    <div>
+                        <label class="field-label" for="cl-bp">혈압 (BP)</label>
+                        <input class="field-input" type="text" id="cl-bp" placeholder="120/80">
+                    </div>
+                    <div>
+                        <label class="field-label" for="cl-pr">맥박 (PR)</label>
+                        <input class="field-input" type="number" id="cl-pr" inputmode="numeric">
+                    </div>
+                    <div>
+                        <label class="field-label" for="cl-bt">체온 (BT)</label>
+                        <input class="field-input" type="number" step="0.1" id="cl-bt" inputmode="decimal">
+                    </div>
+                    <div>
+                        <label class="field-label" for="cl-bst">혈당 (BST)</label>
+                        <input class="field-input" type="number" step="0.1" id="cl-bst" inputmode="decimal">
+                    </div>
+                </div>
+
+                <div class="toggle-row" id="cl-preg-row" hidden>
+                    <label class="toggle"><input type="checkbox" id="cl-is_preg"><span>임신 중</span></label>
+                </div>
+
+                <div class="toggle-row">
+                    <label class="toggle"><input type="checkbox" id="cl-has_htn"><span>고혈압</span></label>
+                    <label class="toggle"><input type="checkbox" id="cl-has_dm"><span>당뇨</span></label>
+                    <label class="toggle"><input type="checkbox" id="cl-has_tbc"><span>결핵</span></label>
+                    <label class="toggle"><input type="checkbox" id="cl-has_hepatitis"><span>간염</span></label>
+                    <label class="toggle"><input type="checkbox" id="cl-has_allergy"><span>알레르기</span></label>
+                    <label class="toggle"><input type="checkbox" id="cl-has_operation"><span>수술 이력</span></label>
+                </div>
+
+                <div class="detail-field" id="cl-allergy-field" hidden>
+                    <label class="field-label" for="cl-allergy_detail">알레르기 상세</label>
+                    <input class="field-input" type="text" id="cl-allergy_detail">
+                </div>
+                <div class="detail-field" id="cl-operation-field" hidden>
+                    <label class="field-label" for="cl-operation_detail">수술 이력 상세</label>
+                    <input class="field-input" type="text" id="cl-operation_detail">
+                </div>
+                <div class="detail-field">
+                    <label class="field-label" for="cl-history_etc">기타 병력</label>
+                    <input class="field-input" type="text" id="cl-history_etc">
+                </div>
+
+                <div class="form-grid">
+                    <div>
+                        <label class="field-label" for="cl-chief_complaint">주호소 *</label>
+                        <input class="field-input" type="text" id="cl-chief_complaint" required>
+                    </div>
+                    <div>
+                        <label class="field-label" for="cl-symptom_duration">발현시기 및 기간</label>
+                        <input class="field-input" type="text" id="cl-symptom_duration">
+                    </div>
+                </div>
+
+                <p class="error-message" id="cl-vitals-error"></p>
+                <button class="btn-secondary" type="submit" id="cl-vitals-submit">정보 수정 저장</button>
+            </form>
+
+            <div id="cl-others-rx-section" hidden>
+                <div class="section-head-row">
+                    <h3 class="form-section-title">다른 의사 처방 <span class="section-head-sub">진료 완료분 · 중복 처방 확인용</span></h3>
+                    <button class="btn-secondary btn-small" type="button" id="cl-others-rx-refresh">새로고침</button>
+                </div>
+                <div id="cl-others-rx" class="prescription-list"></div>
+            </div>
+
+            <h3 class="form-section-title">작성된 처방</h3>
+            <div id="cl-prescriptions" class="prescription-list"></div>
+            <div id="cl-new-rx">
+            <h3 class="form-section-title">새 처방 작성</h3>
+            <div class="field-grid-2">
+                <div>
+                    <label class="field-label" for="rx-department">진료과 *</label>
+                    <select class="field-input" id="rx-department" required></select>
+                </div>
+            </div>
+            <label class="field-label" for="rx-note">진료내용</label>
+            <textarea class="field-input" id="rx-note" rows="2" maxlength="2000" placeholder="소견, 처치 내용 등 (약 처방 없이 작성해도 됩니다)"></textarea>
+
+            <div class="field-grid-2">
+                <div>
+                    <label class="field-label" for="rx-cat1">분류</label>
+                    <select class="field-input" id="rx-cat1"><option value="">전체</option></select>
+                </div>
+                <div>
+                    <label class="field-label" for="rx-cat2">세부 분류</label>
+                    <select class="field-input" id="rx-cat2"><option value="">전체</option></select>
+                </div>
+            </div>
+            <div class="search-row">
+                <input class="field-input" type="text" id="rx-drug-search" placeholder="약 이름·성분으로 검색 (비워두면 전체)">
+                <button class="btn-primary btn-inline" type="button" id="rx-drug-search-btn">검색</button>
+            </div>
+            <div id="rx-drug-results" class="patient-list"></div>
+
+            <div id="rx-cart" class="rx-cart"></div>
+
+            <p class="error-message" id="rx-error"></p>
+            <button class="btn-primary" type="button" id="rx-save-btn">처방 저장</button>
+            </div>
+
+            <div class="intake-actions clinical-footer-actions">
+                <button class="btn-secondary" type="button" id="cl-transfer-btn">다른 의사에게 추가 배정</button>
+                <button class="btn-primary" type="button" id="cl-complete-btn">진료 완료</button>
+                <button class="btn-secondary" type="button" id="cl-uncomplete-btn" hidden>완료 취소</button>
+            </div>
+        </section>
+        <div id="panel-dock"></div>
     </main>
 
+    {% include 'partials/modal.html' %}
+    <div class="toast" id="toast" role="status"></div>
+
     <script src="{% static 'js/api.js' %}"></script>
+    <script src="{% static 'js/common.js' %}"></script>
     <script src="{% static 'js/nav.js' %}"></script>
+    <script src="{% static 'js/modal.js' %}"></script>
+    <script src="{% static 'js/clinical.js' %}"></script>
 </body>
 </html>

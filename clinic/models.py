@@ -50,6 +50,10 @@ class Department(models.Model):
 class DrugCategory1(models.Model):
     """경구/외용/비타민/주사제/소아/추가 - 엑셀 시트 탭 기준"""
     name = models.CharField(max_length=50, unique=True)
+    uses_dosage_schedule = models.BooleanField(
+        default=False,
+        help_text="체크하면 처방 시 1회량/1일횟수/일수로 입력, 해제하면 수량만 직접 입력",
+    )
 
     def __str__(self):
         return self.name
@@ -123,8 +127,12 @@ class VisitDepartment(models.Model):
     """
     visit = models.ForeignKey(Visit, on_delete=models.CASCADE, related_name="visit_departments")
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="assigned_visits")    # 배정의사
+    assigned_by = models.ForeignKey(    # 배정한 사람(접수팀 또는 전과한 의사) - 진료팀은 본인이 한 배정만 취소 가능
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="assignments_made",
+    )
     assigned_at = models.DateTimeField(auto_now_add=True)
     is_done = models.BooleanField(default=False)    # 진료완료
+    done_at = models.DateTimeField(null=True, blank=True)   # 진료완료 시각 (완료 목록 최신순 정렬용, 완료 취소하면 비움)
 
     def __str__(self):
         return f"{self.visit} → {self.user}"

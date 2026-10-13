@@ -1,0 +1,259 @@
+.other-assignments {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 20px;
+}
+
+.other-assignments:empty {
+    display: none;
+}
+
+/* 배정 태그 + [취소] 버튼 한 묶음 */
+.other-assignment {
+    display: inline-flex;
+    align-items: center;
+}
+
+/* 버튼(투명)은 터치 영역 44px을 유지하고, 안쪽 span만 작은 알약 모양으로 보이게 */
+.transfer-cancel {
+    display: inline-flex;
+    align-items: center;
+    padding: 0 0 0 6px;
+}
+
+.transfer-cancel span {
+    padding: 3px 10px;
+    border: 1px solid rgba(178, 58, 46, 0.35);
+    border-radius: 999px;
+    background: var(--color-surface);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-danger);
+}
+
+.transfer-cancel:hover span {
+    background: rgba(178, 58, 46, 0.08);
+}
+
+.prescription-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+/* ---------- 다른 의사 처방 (읽기 전용) ---------- */
+.section-head-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+}
+
+.section-head-sub {
+    margin-left: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--color-text-muted);
+}
+
+.others-rx-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.others-rx-doctor {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-accent);
+}
+
+/* 내 처방 카드와 구분되게 테두리만 */
+#cl-others-rx .prescription-card {
+    background: var(--color-surface);
+    border: 1px dashed var(--color-border);
+}
+
+.prescription-card {
+    padding: 14px;
+    background: var(--color-bg);
+    border-radius: 12px;
+}
+
+.prescription-card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+}
+
+.prescription-card-dept {
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.prescription-card-note {
+    font-size: 13px;
+    color: var(--color-text-muted);
+    white-space: pre-line;
+    margin-bottom: 8px;
+}
+
+.prescription-card-items {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.prescription-drug-chip {
+    padding: 3px 10px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+    font-size: 12px;
+}
+
+/* ---------- 처방 수정 (편집 모드 카드) ---------- */
+.prescription-card.editing {
+    background: var(--color-surface);
+    border: 1px solid var(--color-accent);
+    box-shadow: var(--shadow);
+}
+
+.prescription-card.editing .rx-cart-item {
+    background: var(--color-bg);
+}
+
+.rx-edit-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    margin-top: 6px;
+}
+
+.rx-edit-actions-right {
+    display: flex;
+    gap: 8px;
+}
+
+.rx-edit-actions .btn-primary.btn-inline {
+    min-width: 88px;
+}
+
+@media (max-width: 480px) {
+    .rx-edit-actions {
+        flex-direction: column-reverse;
+        align-items: stretch;
+    }
+    .rx-edit-actions-right .btn-secondary,
+    .rx-edit-actions-right .btn-primary.btn-inline {
+        flex: 1;
+    }
+}
+
+/* PC: 버튼을 내용 크기로 줄여 오른쪽 정렬 (.btn-primary의 width:100%, .btn-secondary의 flex:1을 덮음) */
+.clinical-footer-actions {
+    justify-content: flex-end;
+    margin-top: 20px;
+}
+
+.clinical-footer-actions .btn-secondary,
+.clinical-footer-actions .btn-primary {
+    flex: none;
+    width: auto;
+    padding: 12px 20px;
+}
+
+/* 폰: 세로로 쌓고 전체 폭 (위 규칙과 같은 선택자라 뒤에 와야 이긴다) */
+@media (max-width: 480px) {
+    .clinical-footer-actions {
+        flex-direction: column;
+    }
+    .clinical-footer-actions .btn-secondary,
+    .clinical-footer-actions .btn-primary {
+        width: 100%;
+    }
+}
+
+.field-grid-2 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 14px;
+    margin-bottom: 14px;
+}
+
+textarea.field-input {
+    resize: vertical;
+    min-height: 44px;
+}
+
+.rx-cart {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin: 14px 0;
+}
+
+.rx-cart-item {
+    padding: 12px 14px;
+    background: var(--color-bg);
+    border-radius: 12px;
+}
+
+.rx-cart-item-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.rx-cart-item-name {
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.rx-cart-item-stock {
+    font-size: 12px;
+    color: var(--color-text-muted);
+}
+
+.rx-cart-remove {
+    font-size: 13px;
+    color: var(--color-danger);
+    padding: 6px 8px;
+}
+
+/* 복용스케줄 ↔ 수량 직접 입력 전환 */
+.rx-cart-toggle {
+    margin-top: 8px;
+    padding: 6px 8px;
+    font-size: 13px;
+    color: var(--color-accent);
+}
+
+/* 목록 영역 안의 오류 문구 (검색 실패 등) */
+.empty-text.is-error {
+    color: var(--color-danger);
+}
+
+.rx-cart-fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+    gap: 10px;
+}
+
+.rx-cart-fields .field-input {
+    margin-bottom: 0;
+    padding: 8px 10px;
+    font-size: 14px;
+}
+
+.rx-cart-fields label {
+    display: block;
+    font-size: 12px;
+    color: var(--color-text-muted);
+    margin-bottom: 4px;
+}
