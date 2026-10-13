@@ -1,13 +1,13 @@
-{% load static %}
+{% load static_version %}
 <!DOCTYPE html>
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ 관리자 }} · 의료선교 EMR</title>
-    <link rel="stylesheet" href="{% static 'css/base.css' %}">
-    <link rel="stylesheet" href="{% static 'css/nav.css' %}">
-    <link rel="stylesheet" href="{% static 'css/page.css' %}">
+    <link rel="stylesheet" href="{% static_v 'css/base.css' %}">
+    <link rel="stylesheet" href="{% static_v 'css/nav.css' %}">
+    <link rel="stylesheet" href="{% static_v 'css/page.css' %}">
 </head>
 <body>
     {% include 'partials/nav.html' %}
@@ -16,7 +16,7 @@
         <p style="color: var(--color-text-muted); margin-top: 8px;">준비중입니다.</p>
     </main>
 
-    <script src="{% static 'js/api.js' %}"></script>
-    <script src="{% static 'js/nav.js' %}"></script>
+    <script src="{% static_v 'js/api.js' %}"></script>
+    <script src="{% static_v 'js/nav.js' %}"></script>
 </body>
 </html>
