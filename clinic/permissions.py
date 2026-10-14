@@ -1,5 +1,4 @@
-from datetime import date
-
+from django.utils import timezone
 from rest_framework.permissions import BasePermission
 
 from .models import MissionMembership, VisitDepartment
@@ -7,7 +6,7 @@ from .models import MissionMembership, VisitDepartment
 
 def get_active_memberships(user):
     """로그인한 유저의 '현재 진행중인 미션'에서의 멤버십들"""
-    today = date.today()
+    today = timezone.localdate()
     return MissionMembership.objects.filter(
         user=user,
         mission__start_date__lte=today,

@@ -41,9 +41,8 @@ class MissionStockViewSet(viewsets.ModelViewSet):
     permission_classes = [IsSuperUser]
     
 
-from datetime import date
-
 from django.db.models import Case, When, Value, IntegerField
+from django.utils import timezone
 from rest_framework.generics import ListAPIView
 
 from clinic.models import Mission
@@ -56,7 +55,7 @@ class MissionListView(ListAPIView):
     permission_classes = [IsSuperUser]
 
     def get_queryset(self):
-        today = date.today()
+        today = timezone.localdate()
         return Mission.objects.annotate(
             is_active=Case(
                 When(start_date__lte=today, end_date__gte=today, then=Value(0)),
@@ -64,8 +63,7 @@ class MissionListView(ListAPIView):
                 output_field=IntegerField(),
             )
         ).order_by('is_active', '-start_date')
-        
-from django.utils import timezone
+
 from clinic.models import Visit, Prescription
 
 

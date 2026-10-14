@@ -1,8 +1,7 @@
-from datetime import date
-
 from django.db import transaction
 from django.db.models import Count, F, Q, Sum
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from rest_framework import generics, status
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
@@ -92,7 +91,7 @@ class VisitListCreateView(generics.ListCreateAPIView):
         )
 
         status_param = self.request.query_params.get('status')
-        today = date.today()
+        today = timezone.localdate()
 
         if status_param == 'waiting_vitals':
             # 접수 대기 = 오늘 방문 중 주호소가 아직 비어 있는 환자 (등록번호 순)
@@ -112,7 +111,7 @@ class VisitListCreateView(generics.ListCreateAPIView):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        today = date.today()
+        today = timezone.localdate()
         with transaction.atomic():
             last = (
                 Visit.objects.select_for_update()
@@ -156,7 +155,7 @@ class DoctorWaitCountsView(APIView):
 
         counts = dict(
             VisitDepartment.objects.filter(
-                visit__mission=mission, visit__visit_date=date.today(), is_done=False
+                visit__mission=mission, visit__visit_date=timezone.localdate(), is_done=False
             )
             .values('user_id')
             .annotate(c=Count('id'))
@@ -193,7 +192,7 @@ class VisitDepartmentListCreateView(generics.ListCreateAPIView):
 
     def get_queryset(self):
         qs = (
-            VisitDepartment.objects.filter(user=self.request.user, visit__visit_date=date.today())
+            VisitDepartment.objects.filter(user=self.request.user, visit__visit_date=timezone.localdate())
             .select_related('visit__patient')
         )
         is_done = self.request.query_params.get('is_done', '').lower()
@@ -415,7 +414,7 @@ class DailyDrugStatsView(APIView):
         if mission is None:
             return Response([])
 
-        target_date = request.query_params.get('date', str(date.today()))
+        target_date = request.query_params.get('date', str(timezone.localdate()))
 
         stats = (
             PrescriptionDrug.objects.filter(

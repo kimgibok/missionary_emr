@@ -36,7 +36,8 @@ python manage.py runserver 0.0.0.0:8000   # 같은 Wi-Fi의 폰에서 http://<PC
 ```
 missionary_emr/
 ├─ manage.py
-├─ config/                  settings.py, urls.py (페이지 라우트 + API include)
+├─ config/                  settings.py, urls.py (페이지 라우트 + API include),
+│                           local_settings.example.py (현장별 설정 견본 → local_settings.py로 복사, git 제외)
 ├─ accounts/                커스텀 User, 로그인/로그아웃, 토큰 만료 인증
 │   ├─ models.py            User(AbstractUser): name, age, primary_department
 │   ├─ authentication.py    ExpiringTokenAuthentication
@@ -157,7 +158,8 @@ POST처럼 대상 객체가 없는 요청은 뷰의 `perform_create`에서 `owns
 - 번호 발급·재고 차감처럼 동시 요청이 몰리는 곳은 `transaction.atomic()` + `select_for_update()`를 쓴다.
 - 모델 필드: CharField/TextField는 `blank=True`, 그 외 타입에서 "값 없음"을 허용하려면 `null=True, blank=True`.
   이미 쓰이는 마스터/약품 FK는 `on_delete=PROTECT`, 표시용 참고 FK는 `SET_NULL`.
-- 날짜 기준 필터는 "오늘"(`date.today()`)을 쓴다. 지난 날짜의 미처리 건이 현장 화면에 남지 않게 한다.
+- 날짜 기준 필터는 "오늘"(`timezone.localdate()`)을 쓴다. 지난 날짜의 미처리 건이 현장 화면에 남지 않게 한다.
+  `date.today()`는 서버 PC 시간대를 따라 `settings.TIME_ZONE`과 어긋날 수 있으니 쓰지 않는다.
 
 **프론트엔드**
 - API 호출은 반드시 `static/js/api.js`의 `apiFetch()`를 거친다(토큰 부착, 401이면 로그인 화면으로, 오류 메시지 가공).
@@ -209,6 +211,8 @@ POST처럼 대상 객체가 없는 요청은 뷰의 `perform_create`에서 `owns
 
 **그 이후**
 - 관리자 프론트엔드 (미션 탭 통계, 약품/배치/미션재고 CRUD 화면, 정산, export 다운로드)
+  - 시간대 설정 화면: `SiteConfig`(행 1개, `time_zone`) 모델 + 요청마다 `timezone.activate()`하는 미들웨어 + 관리자 화면에서 선택.
+    같은 화면에 "서버 기준 오늘 날짜·현재 시각·시간대"를 보여줘 설정 실수를 바로 알아보게 한다. 미션 중 변경은 확인 모달.
 - 약국 수령 처리 API 수정: 처방은 있지만 약이 하나도 없는 환자(기도만 하는 경우)도 수령 처리가 되어야 한다. 현재 `DispenseView`가 `items`가 비면 400으로 막는다.
 - 약품 리스트 엑셀(`약품_리스트_아가페_2026_약품분류용1.xlsx`)을 `Drug`/`DrugCategory`/`DrugBatch`로 가져오는 `import_drugs` 관리 커맨드 (시트: 약속처방, 경구, 외용약, 비타민, 주사제, 소아, 추가약)
 - 진료 차트 양식(`고객등록카드(캄보디아) - 2025.hwp`)에 있는 치과 차트(Primary/Permanent teeth) 모델과 화면
@@ -226,7 +230,8 @@ POST처럼 대상 객체가 없는 요청은 뷰의 `perform_create`에서 `owns
 
 - **코드가 기준이다.** Notion에 옮긴 설계 문서(`EMR_DB_설계`, `EMR_페이지_기능명세`, `EMR_API_공통구조`, `EMR_API_명세`)는 일부 오래됐다. 문서에 없고 코드에만 있는 것: `MissionStock`/`DrugBatch` 분리와 `source_detail`, `uses_dosage_schedule`, `User.primary_department`, 접수 대기 기준(맥박 → 주호소), 배정 취소 DELETE, 진료팀용 처방약 수정 URL,
   `VisitDepartment.assigned_by`/`done_at`, 처방 수정·삭제 API, 진료 완료 규칙, 진료팀 본인 배정 권한.
-- **날짜/시간대 불일치 가능성**: 로그인 응답의 `current_missions`는 `timezone.localdate()`, 권한·API는 `date.today()`를 쓴다. `settings.TIME_ZONE`과 서버 PC 시간대가 다르면 자정 근처에 미션이 어긋날 수 있다. 하나로 통일하고 현장 시간대(캄보디아)를 기준으로 설정할 것.
+- **시간대**: `settings.TIME_ZONE` 기본값은 개발 장소인 `Asia/Seoul`이다. 현장에서는 `config/local_settings.example.py`를 `config/local_settings.py`로 복사해 그 나라 시간대(캄보디아 `Asia/Phnom_Penh`)로 바꾼다(git 제외 파일).
+  깜빡하면 한국 시간으로 돌아가서 시각 표시가 어긋나고 밤늦게 날짜가 넘어간다. 시각은 DB에 UTC로 저장되므로 시간대를 바꿔도 지난 기록은 틀어지지 않는다.
 - **`PrescriptionDrug.save()` 자동 계산**: PATCH로 `quantity`만 보내도 세 값(1회량·횟수·일수)이 있으면 덮어쓴다. 약국팀 수정은 `PrescriptionDrugUpdateSerializer.update()`에서 `instance.save(skip_recalculate=True)`를 직접 호출한다.
   `serializer.save(skip_recalculate=True)`처럼 kwarg로 넘기면 DRF가 데이터로 취급해서 동작하지 않는다.
 - `POST /visits/` 응답에는 `assignments`가 없다. 방문을 만든 직후 그 응답을 접수 화면 상태에 넣을 때 `assignments = []`를 직접 채워야 한다.
@@ -235,7 +240,7 @@ POST처럼 대상 객체가 없는 요청은 뷰의 `perform_create`에서 `owns
 - 브라우저 캐시: `{% static_v %}` 덕분에 고친 JS·CSS는 일반 새로고침으로 새로 받는다. 이미 열려 있던 화면은 새로고침 전까지 예전 파일을 쓴다. 그래도 안 먹힌 것처럼 보이면 `Ctrl+Shift+R`.
   (페이지 js끼리 `const` 이름이 겹치면 SyntaxError로 페이지 전체가 멈추니, 옛 파일과 새 파일이 섞인 것처럼 보이면 먼저 새로고침해 본다.) 계정을 바꿔 테스트할 때는 로그아웃 후 재로그인한다(`localStorage`에 이름·권한이 남는다).
 - Windows cmd에서 curl로 한글 파라미터를 보낼 때는 `curl -G <URL> --data-urlencode "search=한글"`을 쓴다. 헤더는 `Authorization: Token <키>`(`Token` 단어와 공백 필수).
-- 개발용 설정이 남아 있다: `ALLOWED_HOSTS = ['*']`, `DEBUG = True`. 현장 배포 전에 허용 IP를 좁히고 `SECRET_KEY`를 점검한다.
+- 개발용 설정이 남아 있다: `ALLOWED_HOSTS = ['*']`, `DEBUG = True`. 현장 배포 전에 `config/local_settings.py`에서 허용 IP를 좁히고 `DEBUG = False`, 새 `SECRET_KEY`를 넣는다.
 - SQLite 한 파일에 여러 기기가 동시에 쓴다. 번호 발급·재고 차감처럼 겹치기 쉬운 곳은 트랜잭션과 `select_for_update()`를 지키고, 현장 투입 전에 동시 접속 부하를 확인한다.
 - 테스트용 계정 비밀번호·토큰은 문서나 커밋에 적지 않는다.
 - Role 이름이나 Department 약어를 admin에서 바꾸면 코드의 문자열 비교(`'진료팀'` 등)와 어긋날 수 있다. 바꾸기 전에 코드를 같이 확인한다.

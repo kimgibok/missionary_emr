@@ -6,6 +6,7 @@ __pycache__/
 db/
 *.sqlite3
 media/
+config/local_settings.py
 
 # 환경/에디터
 .vscode/
