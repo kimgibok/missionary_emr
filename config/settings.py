@@ -115,7 +115,8 @@ AUTH_USER_MODEL = 'accounts.User'
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+# 기본값은 개발 장소(한국). 현장에서는 config/local_settings.py에서 덮어쓴다.
+TIME_ZONE = 'Asia/Seoul'
 
 USE_I18N = True
 
@@ -144,3 +145,11 @@ REST_FRAMEWORK = {
     'DEFAULT_PAGINATION_CLASS': 'clinic.pagination.FlexiblePagination',
     'PAGE_SIZE': 20,
 }
+
+
+# 현장별 설정 덮어쓰기 (config/local_settings.py, git 제외)
+# 견본: config/local_settings.example.py
+try:
+    from .local_settings import *  # noqa: F401,F403
+except ImportError:
+    pass
