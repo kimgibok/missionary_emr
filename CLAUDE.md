@@ -101,6 +101,11 @@ superuser는 백엔드 권한을 전부 통과하므로 nav에서 모든 역할 
 - `PrescriptionDrug`: dose_per_intake × frequency_per_day × duration_days로 `quantity`를 `save()`에서 자동 계산한다. 세 값이 없으면 quantity를 직접 입력한 값 그대로 쓴다.
 - `DrugBatch`는 창고 전체 재고(미션과 무관, source = 후원/현지/구매/현지구매/기타 + source_detail), `MissionStock`은 미션에 챙겨간 몫이다. **처방 시 재고 차감은 `MissionStock.remaining_qty`에서** 일어난다.
   정산: `donated_qty`를 입력하면 `remaining_qty − donated_qty`를 `DrugBatch.remaining_qty`에 합산하고 `is_settled=True`.
+  **재고 규칙(관리자 API)**: 배치 입고 = 창고 잔량 = 입고량(입고량 수정 시 잔량도 같은 만큼) / 미션 배분 = 창고 − 배분량, 현장 = 배분량 /
+  배분량 수정 = 차이만큼 창고↔현장(정산 전, 현장 잔량 안에서) / 배분 삭제 = 현장 잔량을 창고로(조제에 쓰였거나 정산했으면 불가) /
+  정산 = 창고 + (현장 잔량 − 기부량), 두 번 정산 불가. 같은 미션에 같은 배치는 한 번만 배분(더 챙기면 배분량 수정).
+  창고 잔량은 일반 PATCH로 못 바꾸고, 실사 차이는 `adjust`(사유 필수)로만 고친다 → `StockAdjustment`(전→후·사유·누가·언제)에 이력이 남는다. 현장 잔량도 정산 전이면 같은 방식.
+- `StockAdjustment`: 재고 직접 보정 이력. `drugbatch` 또는 `mission_stock` 중 하나. 배분·정산 같은 자동 이동은 남기지 않는다.
 
 **주요 업무 규칙**
 - "접수 대기" = 오늘 방문 중 `chief_complaint=''`, "접수 완료" = 주호소가 입력된 방문.
@@ -144,7 +149,7 @@ superuser는 백엔드 권한을 전부 통과하므로 nav에서 모든 역할 
 | 처방약 수정 | `PATCH prescription-drugs/<pk>/` = 약국팀용(수량만 믿고 재계산 안 함), `PATCH/DELETE prescription-drugs/<pk>/clinical/` = 진료팀용(재계산됨) |
 | 조회용 | `GET departments/`, `drug-categories1/`, `drug-categories2/`, `drugs/` (진료팀 약 검색, MissionStock 기준, `?search=&cat1=&cat2=`) |
 | 약국 | `GET mission-stocks/`, `GET prescription-drugs/stats/?period=day&date= \| ?period=mission`(수령된 약만: summary·drugs + 미션 기준 runway), `GET visits/pharmacy-queue/`(오늘, 등록번호순), `GET visits/pharmacy-done/`(오늘 수령, 최신순), `GET visits/<id>/dispense-options/`, `POST visits/<id>/dispense/` `{items:[{prescription_drug, mission_stock}]}`, `POST visits/<id>/undispense/`, `POST visits/print-claim/` `{ids}` → `{claimed}` (조제 대기·조제 화면 응답에 `slip_printed_at`, `stock_issues`) |
-| 관리자 `manage/` | `GET missions/`, `GET visits/stats/?mission=`, `GET mission-stocks/export/?mission=`, 그리고 라우터 CRUD: `drug-categories1`, `drug-categories2`, `drugs`, `drug-batches`, `mission-stocks` (`POST mission-stocks/<id>/settle/`) |
+| 관리자 `manage/` | `GET missions/`(`is_active`), `GET visits/stats/?mission=`(진료과별 환자 수·전체 방문·실제 환자, 진료 완료 기준), `GET drug-stats/?mission=`(분류별·진료과별 사용량, 다음 미션 준비표, 수령 기준), `GET mission-stocks/export/?mission=`(통계 시트 4개 + `재고-분류` 시트), `GET stock-adjustments/?drugbatch=\|mission_stock=`, 그리고 라우터 CRUD: `drug-categories1`, `drug-categories2`, `drugs`(`?search=&cat1=&cat2=`), `drug-batches`(`?drug=&search=`, `POST <id>/adjust/`), `mission-stocks`(`?mission=&search=`, `POST <id>/adjust/`, `POST <id>/settle/`). 사용 중인 항목 삭제는 400 |
 
 권한 클래스(`clinic/permissions.py`): `IsInfoTeam`, `IsReceptionTeam`, `IsClinicalTeam`, `IsPharmacyTeam`와 조합용(`IsInfoOrReceptionTeam` 등).
 모두 `role_permission(*역할이름)` 팩토리로 만들며, **superuser는 항상 통과**한다. 역할 이름 문자열('안내팀', '접수팀', '진료팀', '약국팀')은 DB의 `Role.name`과 정확히 같아야 한다.
@@ -224,7 +229,9 @@ POST처럼 대상 객체가 없는 요청은 뷰의 `perform_create`에서 `owns
 - 약국 통계 탭의 재고 소진 예상: 약을 정해진 만큼만 가져가 현지에서 더 구하기 어려워, 미션 중에는 쓸모가 적을 수 있다.
   현장 피드백을 받아 필요 없으면 뺀다(다음 미션 계획용 정보는 관리자 '다음 미션 준비표'로).
 - 조제지 실제 프린터 출력 확인: 아직 못 해 봤다(영수증 프린터 예정, 80mm·58mm·A4는 크롬 PDF로만 확인). 현장 프린터가 정해지면 `--kiosk-printing`과 드라이버 용지·자르기 설정을 같이 확인한다.
-- 관리자 프론트엔드 (미션 탭 통계, 약품/배치/미션재고 CRUD 화면, 정산, export 다운로드)
+- 관리자 프론트엔드 (`feature/frontend-admin`) — 1단계 백엔드 정리 완료(재고 규칙·보정 이력·통계·엑셀)
+  - 남은 것: 2단계 화면 골격(미션 탭 + [통계 | 약품 | 창고 재고 | 미션 재고 | 설정]) → 3 통계 → 4 약품 → 5 창고·미션 재고·정산·보정 → 6 설정(시간대)
+  - 미션 생성과 계정 역할 배정(`MissionMembership`)은 Django admin에 둔다.
   - 약 통계(미션 선택 가능, 엑셀 포함): 분류(cat1·cat2)별·진료과별 사용량, 그리고 다음 미션 준비표(약마다 챙겨 간 양·쓴 양·남은 양·하루 평균).
     약국 화면은 "오늘 일하는 화면", 관리자는 "돌아보고 다음 미션을 계획하는 화면"으로 나눈다. 약국팀장도 필요하면 같은 API를 약국 탭에 붙인다.
   - 시간대 설정 화면: `SiteConfig`(행 1개, `time_zone`) 모델 + 요청마다 `timezone.activate()`하는 미들웨어 + 관리자 화면에서 선택.

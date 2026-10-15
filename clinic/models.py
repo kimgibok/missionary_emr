@@ -227,3 +227,21 @@ class PrescriptionDrug(models.Model):
 
     def __str__(self):
         return f"{self.prescription} - {self.drug} x{self.quantity}"
+
+class StockAdjustment(models.Model):
+    """
+    재고 직접 보정 이력 - 실제로 세어 본 수량이 시스템 숫자와 다를 때(파손·분실·계산 착오) 관리자가 고친 기록.
+    창고 배치(drugbatch)나 미션 재고(mission_stock) 중 하나만 채운다.
+    배분·정산처럼 규칙대로 자동으로 바뀌는 것은 여기에 남기지 않는다.
+    """
+    drugbatch = models.ForeignKey(DrugBatch, on_delete=models.CASCADE, null=True, blank=True, related_name="adjustments")
+    mission_stock = models.ForeignKey(MissionStock, on_delete=models.CASCADE, null=True, blank=True, related_name="adjustments")
+    before_qty = models.PositiveIntegerField()
+    after_qty = models.PositiveIntegerField()
+    reason = models.CharField(max_length=200)
+    adjusted_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
+    adjusted_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        target = self.drugbatch or self.mission_stock
+        return f"{target}: {self.before_qty} → {self.after_qty} ({self.reason})"
