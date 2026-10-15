@@ -58,3 +58,93 @@
     padding: 1px 7px;
     font-size: 11px;
 }
+
+/* ---------- 통계 탭 ---------- */
+.stats-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 14px;
+}
+
+.stats-head .section-hint {
+    margin-bottom: 0;
+}
+
+/* 카드 머리에 들어가는 작은 탭 (분류 / 세부 분류) */
+.tab-bar.mini-tabs {
+    margin: 0;
+    padding: 3px;
+}
+
+.mini-tabs .tab-button {
+    padding: 0 12px;
+    font-size: 13px;
+}
+
+/* 합계 행 */
+.stats-table tr.is-total td {
+    font-weight: 700;
+    border-top: 1px solid var(--color-text-muted);
+}
+
+/* 진료과별 사용량 - 누르면 그 과의 약 목록이 펼쳐진다 */
+.dept-row {
+    border-bottom: 1px solid var(--color-border);
+}
+
+.dept-row summary {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    min-height: 44px;
+    padding: 8px 4px;
+    cursor: pointer;
+    list-style: none;
+}
+
+.dept-row summary::-webkit-details-marker {
+    display: none;
+}
+
+.dept-row summary::before {
+    content: '›';
+    width: 12px;
+    font-size: 18px;
+    color: var(--color-text-muted);
+    transition: transform 0.15s ease;
+}
+
+.dept-row[open] summary::before {
+    transform: rotate(90deg);
+}
+
+.dept-name {
+    flex: 1;
+    min-width: 80px;
+    font-weight: 600;
+}
+
+.dept-numbers {
+    font-size: 13px;
+    color: var(--color-text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.dept-numbers strong {
+    color: var(--color-text);
+}
+
+.dept-row .stats-table {
+    margin: 0 0 10px 24px;
+    width: calc(100% - 24px);
+}
+
+/* 준비표에서 다 쓴(남은 양 0) 약 */
+.stats-table tr.is-used-up td:nth-child(5) {
+    color: var(--color-danger);
+    font-weight: 700;
+}

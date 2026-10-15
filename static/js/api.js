@@ -61,3 +61,39 @@ async function apiFetch(path, options = {}) {
 
     return data;
 }
+// 파일 받기 (엑셀 등) - apiFetch처럼 토큰을 붙이고 401이면 로그인 화면으로, 오류는 메시지로 바꿔 던진다.
+// 파일 이름은 서버의 Content-Disposition(filename*=UTF-8''...)을 쓰고, 없으면 fallbackName.
+async function apiDownload(path, fallbackName) {
+    const token = getToken();
+    const response = await fetch(`${API_BASE}${path}`, {
+        headers: token ? { Authorization: `Token ${token}` } : {},
+    });
+
+    if (response.status === 401) {
+        localStorage.clear();
+        window.location.href = '/';
+        throw new Error('로그인이 만료되었습니다. 다시 로그인해주세요.');
+    }
+    if (!response.ok) {
+        let data = null;
+        try {
+            data = await response.json();
+        } catch {
+            data = null;
+        }
+        throw new Error(data ? formatApiError(data) : `서버 오류가 발생했습니다. (${response.status}) 잠시 후 다시 시도해주세요.`);
+    }
+
+    const disposition = response.headers.get('Content-Disposition') || '';
+    const match = disposition.match(/filename\*=UTF-8''([^;]+)/);
+    const filename = match ? decodeURIComponent(match[1]) : fallbackName;
+
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+}

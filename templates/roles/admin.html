@@ -32,9 +32,48 @@
 
         <!-- ===== 통계 ===== -->
         <div class="tab-panel" id="tab-stats" role="tabpanel" hidden>
+            <div class="stats-head">
+                <p class="section-hint" id="stats-mission-label"></p>
+                <button class="btn-primary btn-inline" type="button" id="stats-export-btn">엑셀 다운로드</button>
+            </div>
+
+            <div class="stats-summary" id="admin-stats-summary"></div>
+
             <section class="card">
-                <h2 class="card-title">통계</h2>
-                <p class="empty-text">다음 단계에서 만듭니다.</p>
+                <div class="card-head">
+                    <h2 class="card-title">진료과별 환자 수</h2>
+                </div>
+                <p class="section-hint">진료 완료된 처방 기준입니다. 두 과를 본 환자는 각 과에 1명씩 세므로, 과별 합계가 전체보다 클 수 있습니다.</p>
+                <div class="table-scroll" id="visit-stats-table"></div>
+            </section>
+
+            <section class="card">
+                <div class="card-head">
+                    <h2 class="card-title">약 사용량 · 분류별</h2>
+                    <div class="tab-bar mini-tabs" id="category-tabs" role="radiogroup" aria-label="분류 단계">
+                        <button type="button" class="tab-button" data-level="cat1">분류</button>
+                        <button type="button" class="tab-button" data-level="cat2">세부 분류</button>
+                    </div>
+                </div>
+                <p class="section-hint">약국에서 수령 처리된 약 기준입니다.</p>
+                <div id="category-stats-table"></div>
+            </section>
+
+            <section class="card">
+                <div class="card-head">
+                    <h2 class="card-title">약 사용량 · 진료과별</h2>
+                </div>
+                <p class="section-hint">진료과를 누르면 그 과에서 쓴 약이 보입니다.</p>
+                <div id="department-stats"></div>
+            </section>
+
+            <section class="card">
+                <div class="card-head">
+                    <h2 class="card-title">다음 미션 준비표</h2>
+                    <span class="count-badge" id="prep-days">진료한 날 0일</span>
+                </div>
+                <p class="section-hint">약마다 챙겨 간 양 · 쓴 양 · 남은 양입니다. 하루 평균은 수령 처리가 있던 날 기준입니다.</p>
+                <div class="table-scroll" id="prep-table"></div>
             </section>
         </div>
 
