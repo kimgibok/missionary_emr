@@ -1,5 +1,5 @@
 // =====================================================
-// 여러 페이지가 같이 쓰는 화면 도우미 (접수팀·진료팀, 앞으로 약국팀)
+// 여러 페이지가 같이 쓰는 화면 도우미 (접수팀·진료팀·약국팀·관리자)
 // api.js 다음, 페이지 js보다 먼저 불러온다.
 // =====================================================
 
@@ -49,4 +49,17 @@ function showToast(message, isError = false) {
     el.classList.add('show');
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => el.classList.remove('show'), 2800);
+}
+
+// 이 기기 날짜 "2026-10-15" (약국 통계 기본 날짜·유통기한 비교, 관리자 입고일 기본값)
+function todayStr() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// 서버 시각(ISO) → "2026-10-15 14:35" (이 기기 시간대)
+function dateTimeLabel(iso) {
+    const d = new Date(iso);
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }

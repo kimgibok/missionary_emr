@@ -88,8 +88,32 @@
         <!-- ===== 창고 재고 ===== -->
         <div class="tab-panel" id="tab-warehouse" role="tabpanel" hidden>
             <section class="card">
-                <h2 class="card-title">창고 재고</h2>
-                <p class="empty-text">다음 단계에서 만듭니다.</p>
+                <div class="card-head">
+                    <h2 class="card-title">창고 재고</h2>
+                    <div class="card-head-side">
+                        <span class="count-badge" id="batch-count">0개</span>
+                        <button class="btn-primary btn-inline" type="button" id="batch-add-btn">입고 추가</button>
+                    </div>
+                </div>
+                <p class="section-hint">입고한 배치마다 창고 잔량 / 입고량입니다. 미션에 배분하면 창고에서 빠지고, 정산하면 남은 만큼 돌아옵니다.
+                    실제로 세어 본 수량이 다르면 [잔량 보정]으로 고치세요 (사유가 이력에 남습니다).</p>
+                <div class="admin-filters">
+                    <input class="field-input" type="search" id="batch-search" placeholder="약품명·성분으로 찾기">
+                    <select class="field-input" id="batch-filter-source" aria-label="출처로 거르기">
+                        <option value="">출처 전체</option>
+                        <option value="donation">후원</option>
+                        <option value="local">현지</option>
+                        <option value="purchase">구매</option>
+                        <option value="local_purchase">현지구매</option>
+                        <option value="etc">기타</option>
+                    </select>
+                    <select class="field-input" id="batch-filter-stock" aria-label="잔량으로 거르기">
+                        <option value="">잔량 전체</option>
+                        <option value="left">창고에 남은 것만</option>
+                        <option value="empty">창고 잔량 0</option>
+                    </select>
+                </div>
+                <div id="batch-list" class="admin-list"></div>
             </section>
         </div>
 

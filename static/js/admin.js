@@ -4,6 +4,7 @@
 //   2. 탭 (통계 | 미션 재고 | 창고 재고 | 약품 | 설정)
 //   3. 통계 탭 - 요약, 진료과별 환자 수, 약 분류별·진료과별 사용량, 다음 미션 준비표, 엑셀 다운로드
 //   4. 약품 탭 - 약품·분류·세부 분류 추가·수정·삭제, 검색
+//   5. 창고 재고 탭 - 입고 배치 추가·수정·삭제, 잔량 보정·이력 (보정·이력 모달은 미션 재고와 공용)
 // escapeHtml, showToast, byId는 common.js
 // =====================================================
 
@@ -577,6 +578,297 @@ TAB_LOADERS.drugs = async () => {
     }
     loadDrugs();
 };
+
+
+// =====================================================
+// 공용 - 잔량 보정 모달 · 보정 이력 모달 (창고 배치, 미션 재고)
+// =====================================================
+
+// 실제로 세어 본 수량으로 덮어쓴다. 사유는 필수이고 이력에 남는다.
+function openAdjustModal({ title, name, current, path, onDone }) {
+    openModal({
+        title,
+        bodyHtml: `
+            <p class="modal-note">${escapeHtml(name)}</p>
+            <p class="adjust-current">지금 잔량 <strong>${current}</strong></p>
+            <label class="field-label" for="adj-qty">실제로 센 잔량 *</label>
+            <input class="field-input" type="number" id="adj-qty" min="0" inputmode="numeric" value="${current}">
+            <label class="field-label" for="adj-reason">사유 *</label>
+            <input class="field-input" type="text" id="adj-reason" maxlength="200" placeholder="예: 파손 2개, 실사 결과">
+            <p class="error-message" id="adj-error"></p>`,
+        confirmLabel: '보정하기',
+        onConfirm: () => { saveAdjustment(current, path, onDone); return false; },
+    });
+    byId('adj-qty').select();
+}
+
+async function saveAdjustment(current, path, onDone) {
+    if (isBusy) return;
+    const errorEl = byId('adj-error');
+    const raw = byId('adj-qty').value.trim();
+    const qty = Number(raw);
+    const reason = byId('adj-reason').value.trim();
+    if (raw === '' || !Number.isInteger(qty) || qty < 0) { errorEl.textContent = '0 이상의 정수를 입력해주세요.'; return; }
+    if (qty === current) { errorEl.textContent = '지금 잔량과 같습니다. 바꿀 수량을 입력해주세요.'; return; }
+    if (!reason) { errorEl.textContent = '사유를 입력해주세요.'; return; }
+
+    isBusy = true;
+    try {
+        await apiFetch(path, { method: 'POST', body: JSON.stringify({ remaining_qty: qty, reason }) });
+    } catch (err) {
+        errorEl.textContent = err.message;
+        return;
+    } finally {
+        isBusy = false;
+    }
+    closeModal();
+    showToast(`잔량을 ${current} → ${qty}(으)로 보정했습니다.`);
+    onDone();
+}
+
+// query: 'drugbatch=3' 또는 'mission_stock=7'
+async function openHistoryModal(name, query) {
+    let bodyHtml;
+    try {
+        const data = await apiFetch(`/manage/stock-adjustments/?${query}&page_size=200`);
+        bodyHtml = data.results.length === 0
+            ? '<p class="modal-note">아직 보정한 기록이 없습니다.</p>'
+            : `<ul class="history-list">${data.results.map((h) => `
+                   <li>
+                       <span class="history-change">${h.before_qty} → ${h.after_qty}</span> · ${escapeHtml(h.reason)}
+                       <span class="history-meta">${dateTimeLabel(h.adjusted_at)} · ${escapeHtml(h.adjusted_by_name || '알 수 없음')}</span>
+                   </li>`).join('')}
+               </ul>`;
+    } catch (err) {
+        bodyHtml = `<p class="error-message">${escapeHtml(err.message)}</p>`;
+    }
+    openModal({
+        title: '보정 이력',
+        bodyHtml: `<p class="modal-note">${escapeHtml(name)}</p>${bodyHtml}`,
+        confirmLabel: '닫기',
+        onConfirm: () => {},
+        hideCancel: true,
+    });
+}
+
+
+// =====================================================
+// 5. 창고 재고 탭 - 입고 배치 (미션과 상관없는 창고 전체)
+// =====================================================
+
+const SOURCE_OPTIONS = [
+    ['donation', '후원'], ['local', '현지'], ['purchase', '구매'], ['local_purchase', '현지구매'], ['etc', '기타'],
+];
+
+let batchList = [];             // 지금 검색어의 창고 배치 (출처·잔량 필터는 화면에서)
+let allDrugs = [];              // 입고 모달의 약품 선택지 (분류별로 묶음)
+let batchRequestSeq = 0;
+let batchSearchTimer = null;
+
+// 여러 항목을 " · "로 잇되, 폰에서 항목 중간("단위 1 / 병")이 끊기지 않게 항목마다 묶는다 (escape된 HTML)
+function joinParts(parts) {
+    return parts.filter(Boolean).map((p) => `<span class="nowrap">${escapeHtml(p)}</span>`).join(' · ');
+}
+
+// "유통기한 2027-01-01 (지남) · 후원 (교회 후원) · 입고 2026-08-01 · 단위 100정"
+function batchSubHtml(b) {
+    const expired = b.expiry_date < todayStr() ? ' (지남)' : '';
+    const source = b.source_detail ? `${b.source_display} (${b.source_detail})` : b.source_display;
+    return joinParts([`유통기한 ${b.expiry_date}${expired}`, source, `입고 ${b.received_date}`, `단위 ${b.unit_qty}${b.unit_label}`]);
+}
+
+function batchRowHtml(b) {
+    return `
+        <div class="admin-row${b.remaining_qty === 0 ? ' is-empty' : ''}" data-id="${b.id}">
+            <span class="admin-row-main">
+                <span class="admin-row-title">${escapeHtml(b.drug_name)}</span>
+                <span class="admin-row-sub">${batchSubHtml(b)}</span>
+            </span>
+            <span class="admin-row-qty">
+                <span class="admin-row-qty-main">${b.remaining_qty} <small>/ ${b.total_qty}</small></span>
+                <span class="admin-row-qty-label">창고 잔량 / 입고량</span>
+            </span>
+            <span class="admin-row-actions">
+                <button type="button" class="btn-secondary btn-small" data-action="edit">수정</button>
+                <button type="button" class="btn-secondary btn-small" data-action="adjust">잔량 보정</button>
+                <button type="button" class="row-link" data-action="history">이력</button>
+                <button type="button" class="row-delete" data-action="delete">삭제</button>
+            </span>
+        </div>`;
+}
+
+function renderBatches() {
+    const source = byId('batch-filter-source').value;
+    const stock = byId('batch-filter-stock').value;
+    const rows = batchList.filter((b) => (!source || b.source === source)
+        && (stock !== 'left' || b.remaining_qty > 0)
+        && (stock !== 'empty' || b.remaining_qty === 0));
+    byId('batch-count').textContent = `${rows.length}개`;
+    byId('batch-list').innerHTML = rows.length === 0
+        ? emptyRowHtml(batchList.length === 0 && !byId('batch-search').value.trim()
+            ? '입고한 배치가 없습니다. [입고 추가]로 등록하세요.'
+            : '조건에 맞는 배치가 없습니다.')
+        : rows.map(batchRowHtml).join('');
+}
+
+async function loadBatches() {
+    const seq = ++batchRequestSeq;
+    const params = new URLSearchParams({ page_size: '500' });
+    const search = byId('batch-search').value.trim();
+    if (search) params.set('search', search);
+    try {
+        const data = await apiFetch(`/manage/drug-batches/?${params}`);
+        if (seq !== batchRequestSeq) return;
+        batchList = data.results;
+        renderBatches();
+    } catch (err) {
+        if (seq !== batchRequestSeq) return;
+        byId('batch-list').innerHTML = `<p class="empty-text is-error">${escapeHtml(err.message)}</p>`;
+    }
+}
+
+// 약품 선택지 - 분류별 <optgroup>
+function drugOptionsHtml(selectedId) {
+    const groups = new Map();
+    allDrugs.forEach((d) => {
+        if (!groups.has(d.cat1_name)) groups.set(d.cat1_name, []);
+        groups.get(d.cat1_name).push(d);
+    });
+    return '<option value="">약품 선택</option>' + [...groups].map(([cat, drugs]) => `
+        <optgroup label="${escapeHtml(cat)}">
+            ${drugs.map((d) => `<option value="${d.id}"${d.id === selectedId ? ' selected' : ''}>${escapeHtml(d.name)}</option>`).join('')}
+        </optgroup>`).join('');
+}
+
+async function openBatchModal(batch = null) {
+    try {
+        allDrugs = (await apiFetch('/manage/drugs/?page_size=500')).results;
+    } catch (err) {
+        showToast(err.message, true);
+        return;
+    }
+    if (allDrugs.length === 0) {
+        showToast('약품 탭에서 약품을 먼저 등록해주세요.', true);
+        return;
+    }
+    const v = (field, fallback = '') => escapeHtml(batch ? batch[field] : fallback);
+    const sourceOptions = SOURCE_OPTIONS.map(([value, label]) =>
+        `<option value="${value}"${(batch ? batch.source : 'donation') === value ? ' selected' : ''}>${label}</option>`).join('');
+    const totalNote = batch
+        ? '<p class="modal-note">입고량을 바꾸면 창고 잔량도 같은 만큼 바뀝니다. 세어 본 수량이 다른 거라면 [잔량 보정]을 쓰세요.</p>'
+        : '';
+
+    openModal({
+        title: batch ? '입고 배치 수정' : '입고 추가',
+        bodyHtml: `
+            <label class="field-label" for="bm-drug">약품 *</label>
+            <select class="field-input" id="bm-drug">${drugOptionsHtml(batch ? batch.drug : null)}</select>
+            <div class="form-grid">
+                <div>
+                    <label class="field-label" for="bm-source">출처 *</label>
+                    <select class="field-input" id="bm-source">${sourceOptions}</select>
+                </div>
+                <div>
+                    <label class="field-label" for="bm-source-detail">출처 상세</label>
+                    <input class="field-input" type="text" id="bm-source-detail" maxlength="100" placeholder="예: OO교회" value="${v('source_detail')}">
+                </div>
+                <div>
+                    <label class="field-label" for="bm-received">입고일 *</label>
+                    <input class="field-input" type="date" id="bm-received" value="${v('received_date', todayStr())}">
+                </div>
+                <div>
+                    <label class="field-label" for="bm-expiry">유통기한 *</label>
+                    <input class="field-input" type="date" id="bm-expiry" value="${v('expiry_date')}">
+                </div>
+                <div>
+                    <label class="field-label" for="bm-unit-qty">포장 단위 수량 *</label>
+                    <input class="field-input" type="number" id="bm-unit-qty" min="1" inputmode="numeric" value="${v('unit_qty', '1')}">
+                </div>
+                <div>
+                    <label class="field-label" for="bm-unit-label">단위 *</label>
+                    <input class="field-input" type="text" id="bm-unit-label" maxlength="20" placeholder="정, 병, 튜브" value="${v('unit_label', '정')}">
+                </div>
+            </div>
+            <label class="field-label" for="bm-total">입고량 *</label>
+            <input class="field-input" type="number" id="bm-total" min="0" inputmode="numeric" value="${v('total_qty')}">
+            ${totalNote}
+            <p class="error-message" id="bm-error"></p>`,
+        confirmLabel: batch ? '저장' : '입고',
+        onConfirm: () => { saveBatch(batch); return false; },
+    });
+}
+
+async function saveBatch(batch) {
+    if (isBusy) return;
+    const errorEl = byId('bm-error');
+    const int = (id) => {
+        const raw = byId(id).value.trim();
+        return raw === '' ? NaN : Number(raw);
+    };
+    const body = {
+        drug: Number(byId('bm-drug').value),
+        source: byId('bm-source').value,
+        source_detail: byId('bm-source-detail').value.trim(),
+        received_date: byId('bm-received').value,
+        expiry_date: byId('bm-expiry').value,
+        unit_qty: int('bm-unit-qty'),
+        unit_label: byId('bm-unit-label').value.trim(),
+        total_qty: int('bm-total'),
+    };
+    if (!body.drug) { errorEl.textContent = '약품을 골라주세요.'; return; }
+    if (!body.received_date || !body.expiry_date) { errorEl.textContent = '입고일과 유통기한을 입력해주세요.'; return; }
+    if (!Number.isInteger(body.unit_qty) || body.unit_qty < 1 || !body.unit_label) {
+        errorEl.textContent = '포장 단위 수량(1 이상)과 단위를 입력해주세요.';
+        return;
+    }
+    if (!Number.isInteger(body.total_qty) || body.total_qty < 0) { errorEl.textContent = '입고량은 0 이상의 정수로 입력해주세요.'; return; }
+
+    isBusy = true;
+    try {
+        await apiFetch(batch ? `/manage/drug-batches/${batch.id}/` : '/manage/drug-batches/', {
+            method: batch ? 'PATCH' : 'POST',
+            body: JSON.stringify(body),
+        });
+    } catch (err) {
+        errorEl.textContent = err.message;
+        return;
+    } finally {
+        isBusy = false;
+    }
+    closeModal();
+    showToast(batch ? '저장했습니다.' : '입고를 등록했습니다.');
+    loadBatches();
+}
+
+byId('batch-list').addEventListener('click', (e) => {
+    const row = e.target.closest('.admin-row');
+    const action = e.target.dataset.action;
+    if (!row || !action) return;
+    const b = batchList.find((x) => x.id === Number(row.dataset.id));
+    if (!b) return;
+    const name = `${b.drug_name} · 유통기한 ${b.expiry_date} · ${b.source_display}`;
+    if (action === 'edit') openBatchModal(b);
+    if (action === 'adjust') {
+        openAdjustModal({
+            title: '창고 잔량 보정', name, current: b.remaining_qty,
+            path: `/manage/drug-batches/${b.id}/adjust/`, onDone: loadBatches,
+        });
+    }
+    if (action === 'history') openHistoryModal(name, `drugbatch=${b.id}`);
+    if (action === 'delete') {
+        confirmDelete({ title: '입고 배치 삭제', name, path: `/manage/drug-batches/${b.id}/`, onDone: loadBatches });
+    }
+});
+
+byId('batch-add-btn').addEventListener('click', () => openBatchModal());
+byId('batch-search').addEventListener('input', () => {
+    clearTimeout(batchSearchTimer);
+    batchSearchTimer = setTimeout(loadBatches, 300);
+});
+byId('batch-filter-source').addEventListener('change', renderBatches);
+byId('batch-filter-stock').addEventListener('change', renderBatches);
+
+TAB_LOADERS.warehouse = loadBatches;
 
 
 // =====================================================
