@@ -156,6 +156,9 @@ class VisitDepartmentDoneSerializer(serializers.ModelSerializer):
         # 완료 시각 기록 (완료 목록 최신순 정렬용), 완료 취소하면 비움
         if 'is_done' in validated_data:
             validated_data['done_at'] = timezone.now() if validated_data['is_done'] else None
+        if validated_data.get('is_done') is False:
+            # 처방을 고쳐 다시 완료하면 수정된 조제지가 약국에서 자동으로 다시 출력되게
+            Visit.objects.filter(pk=instance.visit_id).update(slip_printed_at=None)
         return super().update(instance, validated_data)
 
 
@@ -266,7 +269,7 @@ class MissionStockSerializer(serializers.ModelSerializer):
     drug_name = serializers.CharField(source='drugbatch.drug.name', read_only=True)
     ingredient = serializers.CharField(source='drugbatch.drug.ingredient', read_only=True)
     expiry_date = serializers.DateField(source='drugbatch.expiry_date', read_only=True)
-    source = serializers.CharField(source='drugbatch.source', read_only=True)
+    source = serializers.CharField(source='drugbatch.get_source_display', read_only=True)
 
     class Meta:
         model = MissionStock
@@ -276,46 +279,110 @@ class MissionStockSerializer(serializers.ModelSerializer):
         ]
 
 
-class PrescriptionDrugItemSerializer(serializers.ModelSerializer):
+class PharmacyDrugItemSerializer(serializers.ModelSerializer):
+    """약국팀 처방약 한 줄 - 환자에게 복용법을 설명할 수 있게 복용스케줄·용법 포함"""
     drug_name = serializers.CharField(source='drug.name', read_only=True)
+    usage = serializers.CharField(source='drug.usage', read_only=True)
+    dispensed_batch = serializers.SerializerMethodField()
 
     class Meta:
         model = PrescriptionDrug
-        fields = ['id', 'drug_name', 'quantity']
+        fields = [
+            'id', 'drug', 'drug_name', 'usage',
+            'dose_per_intake', 'frequency_per_day', 'duration_days', 'quantity',
+            'dispensed_stock', 'dispensed_batch',
+        ]
+
+    def get_dispensed_batch(self, obj):
+        """수령 완료 목록에 보일 '조제한 배치' - 유통기한·출처 (수령 전이면 None)"""
+        stock = obj.dispensed_stock
+        if stock is None:
+            return None
+        return {'expiry_date': stock.drugbatch.expiry_date, 'source': stock.drugbatch.get_source_display()}
 
 
-class PrescriptionWithItemsSerializer(serializers.ModelSerializer):
-    """약국팀 처방대기리스트에서 쓰는 처방 표현 - 처방약 목록 nested"""
-    items = PrescriptionDrugItemSerializer(many=True, read_only=True)
+class PharmacyPrescriptionSerializer(serializers.ModelSerializer):
+    """약국팀 처방 한 건 - 진료과·의사·진료내용 + 처방약 목록"""
     department_name = serializers.CharField(source='department.name', read_only=True)
+    doctor_name = serializers.SerializerMethodField()
+    items = PharmacyDrugItemSerializer(many=True, read_only=True)
 
     class Meta:
         model = Prescription
-        fields = ['id', 'department_name', 'items']
+        fields = ['id', 'department_name', 'doctor_name', 'clinical_note', 'is_dispensed', 'dispensed_at', 'items']
+
+    def get_doctor_name(self, obj):
+        doctor = obj.visit_department.user
+        return doctor.name or doctor.username
 
 
-class PharmacyQueueSerializer(serializers.ModelSerializer):
-    """약국팀 대기리스트 - 환자 단위, 미수령 처방들 nested"""
+def find_stock_issues(prescriptions, stock_max):
+    """
+    조제 전에 의사 확인이 필요한 처방약 목록 - 조제지·자동 출력 경고·목록 태그용.
+    prescriptions: 직렬화된 처방 목록, stock_max: {약 id: 이번 미션(정산 전) 배치 중 가장 많이 남은 잔량}
+    유통기한이 지난 배치는 현장 판단에 맡기므로 문제로 보지 않는다.
+    """
+    issues = []
+    for prescription in prescriptions:
+        for item in prescription['items']:
+            best = stock_max.get(item['drug'])
+            if item['quantity'] == 0:
+                message = '수량 0 (처방 확인 필요)'
+            elif best is None:
+                message = '이번 미션 재고에 없음'
+            elif best < item['quantity']:
+                message = f"재고 부족 (필요 {item['quantity']}, 가장 많이 남은 배치 {best})"
+            else:
+                continue
+            issues.append({'prescription_drug': item['id'], 'drug_name': item['drug_name'], 'message': message})
+    return issues
+
+
+class PharmacyVisitSerializer(serializers.ModelSerializer):
+    """
+    약국팀 환자(방문) 단위 표현 - 조제 대기 / 수령 완료 목록 / 조제 화면 공용.
+    context['dispensed']가 True면 수령된 처방만, 아니면 미수령 처방만 담는다.
+    context['stock_max']가 있으면 stock_issues(재고 확인이 필요한 약)를 같이 담는다.
+    """
     patient = PatientSerializer(read_only=True)
     prescriptions = serializers.SerializerMethodField()
 
     class Meta:
         model = Visit
-        fields = ['id', 'reg_no', 'patient', 'prescriptions']
+        fields = [
+            'id', 'reg_no', 'visit_date', 'patient', 'weight', 'has_allergy', 'allergy_detail',
+            'slip_printed_at', 'prescriptions',
+        ]
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        stock_max = self.context.get('stock_max')
+        if stock_max is not None:
+            data['stock_issues'] = find_stock_issues(data['prescriptions'], stock_max)
+        return data
 
     def get_prescriptions(self, obj):
-        qs = Prescription.objects.filter(
-            visit_department__visit=obj, is_dispensed=False
-        ).select_related('department').prefetch_related('items__drug')
-        return PrescriptionWithItemsSerializer(qs, many=True).data
+        qs = (
+            Prescription.objects.filter(
+                visit_department__visit=obj, is_dispensed=self.context.get('dispensed', False)
+            )
+            .select_related('department', 'visit_department__user')
+            .prefetch_related('items__drug', 'items__dispensed_stock__drugbatch')
+            .order_by('id')
+        )
+        return PharmacyPrescriptionSerializer(qs, many=True).data
 
 
 class PrescriptionDrugUpdateSerializer(serializers.ModelSerializer):
-    """약국팀 - 처방약 수정. 약국이 조정한 수량을 그대로 믿고 재계산하지 않는다."""
+    """
+    약국팀 - 처방약 수량 수정(1 이상). 약국이 조정한 수량을 그대로 믿고 재계산하지 않는다.
+    재고가 없어 약을 바꾸거나 빼야 하면 0으로 만들지 않고 의사가 [완료 취소] 후 수정한다.
+    """
     class Meta:
         model = PrescriptionDrug
-        fields = ['id', 'prescription', 'drug', 'dose_per_intake', 'frequency_per_day', 'duration_days', 'quantity']
+        fields = ['id', 'quantity']
         read_only_fields = ['id']
+        extra_kwargs = {'quantity': {'required': True, 'min_value': 1}}
 
     def update(self, instance, validated_data):
         for attr, value in validated_data.items():

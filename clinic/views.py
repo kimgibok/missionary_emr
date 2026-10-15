@@ -1,7 +1,10 @@
+from collections import defaultdict
+
 from django.db import transaction
-from django.db.models import Count, F, Q, Sum
+from django.db.models import Count, F, Max, Q, Sum
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 from rest_framework import generics, status
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
@@ -26,7 +29,7 @@ from .serializers import (
     DepartmentSerializer, DrugCategory1ReadSerializer, DrugCategory2ReadSerializer, DrugSearchSerializer,
     PrescriptionCreateSerializer, PrescriptionListSerializer, PrescriptionUpdateSerializer,
     PrescriptionDrugCreateSerializer, PrescriptionDrugClinicalUpdateSerializer, PrescriptionDrugUpdateSerializer,
-    MissionStockSerializer, PharmacyQueueSerializer,
+    MissionStockSerializer, PharmacyVisitSerializer,
 )
 
 
@@ -387,9 +390,28 @@ class PrescriptionDrugClinicalUpdateView(generics.UpdateAPIView, generics.Destro
 # =====================================================
 # 약국팀
 # =====================================================
+# SQLite는 select_for_update()를 무시한다(아무 잠금도 걸지 않음).
+# 그래서 수령·수령 취소는 "조건부 UPDATE(예: is_dispensed=False인 것만) 후 바뀐 행 수 확인"으로
+# 두 기기에서 동시에 눌러도 재고가 두 번 빠지거나 두 번 돌아오지 않게 한다.
+
+def get_pharmacy_visit(user, visit_id):
+    """약국팀이 조제·수령·수령 취소할 방문 - 현재 미션의 오늘 방문만 (아니면 404)"""
+    mission = get_current_mission(user)
+    return get_object_or_404(Visit, pk=visit_id, mission=mission, visit_date=timezone.localdate())
+
+
+def mission_stock_max(mission):
+    """{약 id: 이번 미션(정산 전) 배치 중 가장 많이 남은 잔량} - 조제지·목록의 '재고 확인' 표시용"""
+    return dict(
+        MissionStock.objects.filter(mission=mission, is_settled=False)
+        .values('drugbatch__drug_id')
+        .annotate(best=Max('remaining_qty'))
+        .values_list('drugbatch__drug_id', 'best')
+    )
+
 
 class MissionStockListView(generics.ListAPIView):
-    """약국팀 재고 조회 - 현재 미션의 MissionStock (?search=)"""
+    """약국팀 재고 조회 - 현재 미션의 MissionStock, 약 이름·유통기한 순 (?search= 약 이름·성분)"""
     serializer_class = MissionStockSerializer
     permission_classes = [IsPharmacyTeam]
 
@@ -398,15 +420,22 @@ class MissionStockListView(generics.ListAPIView):
         if mission is None:
             return MissionStock.objects.none()
 
-        qs = MissionStock.objects.filter(mission=mission).select_related('drugbatch__drug')
+        qs = (
+            MissionStock.objects.filter(mission=mission)
+            .select_related('drugbatch__drug')
+            .order_by('drugbatch__drug__name', 'drugbatch__expiry_date', 'id')
+        )
         search = self.request.query_params.get('search')
         if search:
-            qs = qs.filter(drugbatch__drug__name__icontains=search)
+            qs = qs.filter(
+                Q(drugbatch__drug__name__icontains=search) |
+                Q(drugbatch__drug__ingredient__icontains=search)
+            )
         return qs
 
 
 class DailyDrugStatsView(APIView):
-    """약국팀 일별 약품 사용 통계 (?date=YYYY-MM-DD, 기본 오늘)"""
+    """약국팀 일별 약품 사용 통계 - 실제로 수령 처리된 약만 합산 (?date=YYYY-MM-DD, 기본 오늘)"""
     permission_classes = [IsPharmacyTeam]
 
     def get(self, request):
@@ -414,16 +443,23 @@ class DailyDrugStatsView(APIView):
         if mission is None:
             return Response([])
 
-        target_date = request.query_params.get('date', str(timezone.localdate()))
+        date_param = request.query_params.get('date')
+        try:
+            target_date = parse_date(date_param) if date_param else timezone.localdate()
+        except ValueError:  # 형식은 맞지만 없는 날짜 (예: 2026-13-01)
+            target_date = None
+        if target_date is None:
+            raise ValidationError({'detail': '날짜 형식이 올바르지 않습니다. (예: 2026-10-15)'})
 
         stats = (
             PrescriptionDrug.objects.filter(
                 prescription__visit_department__visit__mission=mission,
                 prescription__visit_department__visit__visit_date=target_date,
+                prescription__is_dispensed=True,
             )
             .values('drug_id', 'drug__name')
             .annotate(total_quantity=Sum('quantity'))
-            .order_by('-total_quantity')
+            .order_by('-total_quantity', 'drug__name')
         )
         return Response([
             {'drug_id': s['drug_id'], 'drug_name': s['drug__name'], 'total_quantity': s['total_quantity']}
@@ -432,8 +468,11 @@ class DailyDrugStatsView(APIView):
 
 
 class PharmacyQueueView(generics.ListAPIView):
-    """환자 단위 처방 대기 리스트 - 배정된 모든 VisitDepartment가 완료되고, 미수령 처방이 있는 방문만"""
-    serializer_class = PharmacyQueueSerializer
+    """
+    조제 대기 - 환자 단위, 등록번호 순.
+    오늘 방문 중 배정된 모든 진료가 끝났고(VisitDepartment 전부 is_done) 미수령 처방이 있는 방문만.
+    """
+    serializer_class = PharmacyVisitSerializer
     permission_classes = [IsPharmacyTeam]
 
     def get_queryset(self):
@@ -441,78 +480,252 @@ class PharmacyQueueView(generics.ListAPIView):
         if mission is None:
             return Visit.objects.none()
 
-        qs = Visit.objects.filter(mission=mission).exclude(visit_departments__is_done=False)
-        qs = qs.filter(visit_departments__prescriptions__is_dispensed=False).distinct()
-        return qs.select_related('patient')
+        return (
+            Visit.objects.filter(
+                mission=mission,
+                visit_date=timezone.localdate(),
+                visit_departments__prescriptions__is_dispensed=False,
+            )
+            .exclude(visit_departments__is_done=False)
+            .distinct()
+            .select_related('patient')
+            .order_by('reg_no')
+        )
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        mission = get_current_mission(self.request.user)
+        context['stock_max'] = mission_stock_max(mission) if mission else {}
+        return context
+
+
+class PrintClaimView(APIView):
+    """
+    조제지 자동 출력 - body {"ids": [방문 id, ...]} 중 아직 출력하지 않은 것만 '출력함'으로 바꾸고 그 id만 돌려준다.
+    자동 출력을 켠 기기가 둘이어도 먼저 가져간 쪽만 출력하게 된다.
+    """
+    permission_classes = [IsPharmacyTeam]
+
+    def post(self, request):
+        ids = request.data.get('ids', [])
+        if not isinstance(ids, list) or not all(isinstance(i, int) for i in ids):
+            raise ValidationError({'detail': 'ids는 방문 번호 목록이어야 합니다.'})
+        mission = get_current_mission(request.user)
+        if mission is None or not ids:
+            return Response({'claimed': []})
+
+        # transaction_mode IMMEDIATE라 이 블록은 다른 쓰기 요청과 겹치지 않는다
+        with transaction.atomic():
+            claimed = list(
+                Visit.objects.filter(
+                    id__in=ids, mission=mission, visit_date=timezone.localdate(), slip_printed_at__isnull=True,
+                ).values_list('id', flat=True)
+            )
+            Visit.objects.filter(id__in=claimed).update(slip_printed_at=timezone.now())
+        return Response({'claimed': claimed})
+
+
+class PharmacyDoneView(generics.ListAPIView):
+    """수령 완료 - 오늘 수령 처리된 처방이 있는 방문, 수령 시각 최신순 (수령된 처방만 담김)"""
+    serializer_class = PharmacyVisitSerializer
+    permission_classes = [IsPharmacyTeam]
+
+    def get_queryset(self):
+        mission = get_current_mission(self.request.user)
+        if mission is None:
+            return Visit.objects.none()
+
+        # 같은 조인에서 filter → annotate 하므로 Max는 수령된 처방의 시각만 본다
+        return (
+            Visit.objects.filter(
+                mission=mission,
+                visit_date=timezone.localdate(),
+                visit_departments__prescriptions__is_dispensed=True,
+            )
+            .annotate(last_dispensed_at=Max('visit_departments__prescriptions__dispensed_at'))
+            .select_related('patient')
+            .order_by(F('last_dispensed_at').desc(nulls_last=True), '-reg_no')
+        )
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['dispensed'] = True
+        return context
 
 
 class DispenseOptionsView(APIView):
-    """조제 화면 진입 - 환자의 미수령 처방약 전부 + 각각 선택 가능한 배치(MissionStock) 목록"""
+    """조제 화면 - 환자의 미수령 처방 전부 + 처방약마다 고를 수 있는 배치(이번 미션, 정산 전, 유통기한 순)"""
     permission_classes = [IsPharmacyTeam]
 
     def get(self, request, visit_id):
-        mission = get_current_mission(request.user)
-        items = PrescriptionDrug.objects.filter(
-            prescription__visit_department__visit_id=visit_id,
-            prescription__is_dispensed=False,
-        ).select_related('drug')
+        visit = get_pharmacy_visit(request.user, visit_id)
+        data = PharmacyVisitSerializer(visit, context={'stock_max': mission_stock_max(visit.mission)}).data
 
-        result = []
-        for item in items:
-            batches = MissionStock.objects.filter(
-                mission=mission, drugbatch__drug=item.drug
-            ).select_related('drugbatch').order_by('drugbatch__expiry_date')
-
-            result.append({
-                'prescription_drug_id': item.id,
-                'drug_name': item.drug.name,
-                'quantity': item.quantity,
-                'available_batches': [
-                    {
-                        'mission_stock_id': b.id,
-                        'expiry_date': b.drugbatch.expiry_date,
-                        'remaining_qty': b.remaining_qty,
-                    }
-                    for b in batches
-                ],
+        drug_ids = {item['drug'] for p in data['prescriptions'] for item in p['items']}
+        stocks = (
+            MissionStock.objects.filter(mission=visit.mission, drugbatch__drug_id__in=drug_ids, is_settled=False)
+            .select_related('drugbatch')
+            .order_by('drugbatch__expiry_date', 'id')
+        )
+        batches_by_drug = defaultdict(list)
+        for stock in stocks:
+            batches_by_drug[stock.drugbatch.drug_id].append({
+                'mission_stock_id': stock.id,
+                'expiry_date': stock.drugbatch.expiry_date,
+                'source': stock.drugbatch.get_source_display(),
+                'remaining_qty': stock.remaining_qty,
             })
-        return Response({'items': result})
+
+        for prescription in data['prescriptions']:
+            for item in prescription['items']:
+                item['available_batches'] = batches_by_drug.get(item['drug'], [])
+        return Response(data)
 
 
 class DispenseView(APIView):
-    """수령 처리 - 환자 단위 일괄, 지정 배치에서 재고 차감"""
+    """
+    수령 처리 - 환자 단위 일괄. body: {"items": [{"prescription_drug": id, "mission_stock": id}, ...]}
+    미수령 처방약은 전부 배치를 골라야 한다. 약 없는 처방(기도만 하는 경우)은 items 없이 수령 처리된다.
+    수량 0인 약이 있으면 막는다 - 재고가 없어 약을 바꾸거나 빼야 하면 의사가 [완료 취소] 후 수정한다.
+    """
     permission_classes = [IsPharmacyTeam]
 
     def post(self, request, visit_id):
-        items = request.data.get('items', [])
-        if not items:
-            raise ValidationError({'items': '수령 처리할 항목이 없습니다.'})
+        visit = get_pharmacy_visit(request.user, visit_id)
+        if visit.visit_departments.filter(is_done=False).exists():
+            raise ValidationError({'detail': '아직 진료가 끝나지 않은 의사가 있어 수령 처리할 수 없습니다.'})
+
+        prescription_ids = list(
+            Prescription.objects.filter(visit_department__visit=visit, is_dispensed=False).values_list('id', flat=True)
+        )
+        if not prescription_ids:
+            raise ValidationError({'detail': '수령 처리할 처방이 없습니다. 이미 수령 처리되었을 수 있습니다.'})
+
+        drugs = PrescriptionDrug.objects.filter(prescription_id__in=prescription_ids).select_related('drug').in_bulk()
+        zero = [item.drug.name for item in drugs.values() if item.quantity == 0]
+        if zero:
+            raise ValidationError({
+                'detail': f'수량이 0인 약이 있습니다: {", ".join(zero)}. 의사에게 [완료 취소] 후 처방을 고쳐 달라고 요청하세요.'
+            })
+
+        # 요청 항목 확인: {처방약 id: 배치 id}
+        entries = request.data.get('items', [])
+        if not isinstance(entries, list):
+            raise ValidationError({'detail': 'items는 목록이어야 합니다.'})
+        chosen = {}
+        for entry in entries:
+            try:
+                drug_item_id = int(entry['prescription_drug'])
+                stock_id = int(entry['mission_stock'])
+            except (TypeError, KeyError, ValueError):
+                raise ValidationError({'detail': '처방약과 배치 번호를 확인해 주세요.'})
+            if drug_item_id not in drugs:
+                raise ValidationError({'detail': '이 환자의 수령 대기 처방약이 아닌 항목이 있습니다. 새로고침 후 다시 시도하세요.'})
+            if drug_item_id in chosen:
+                raise ValidationError({'detail': f'{drugs[drug_item_id].drug.name}이(가) 두 번 들어 있습니다.'})
+            chosen[drug_item_id] = stock_id
+
+        missing = [item for pk, item in drugs.items() if pk not in chosen]
+        if missing:
+            names = ', '.join(item.drug.name for item in missing)
+            raise ValidationError({'detail': f'배치를 고르지 않은 약이 있습니다: {names}'})
+
+        # 배치 확인 + 배치별로 뺄 양 합산 (두 의사가 같은 약을 처방하면 한 배치에서 두 번 뺄 수 있다)
+        stocks = (
+            MissionStock.objects.filter(mission=visit.mission)
+            .select_related('drugbatch__drug')
+            .in_bulk(set(chosen.values()))
+        )
+        demand = defaultdict(int)
+        for drug_item_id, stock_id in chosen.items():
+            item = drugs[drug_item_id]
+            stock = stocks.get(stock_id)
+            if stock is None or stock.drugbatch.drug_id != item.drug_id:
+                raise ValidationError({'detail': f'{item.drug.name}: 고른 배치가 이 약의 이번 미션 재고가 아닙니다.'})
+            if stock.is_settled:
+                raise ValidationError({'detail': f'{item.drug.name}: 이미 정산이 끝난 배치입니다.'})
+            demand[stock_id] += item.quantity
 
         with transaction.atomic():
-            for entry in items:
-                prescription_drug = PrescriptionDrug.objects.select_related('prescription').get(
-                    id=entry['prescription_drug']
-                )
-                mission_stock = MissionStock.objects.select_for_update().get(id=entry['mission_stock'])
+            # 먼저 처방을 수령 상태로 바꾼다. 다른 기기가 먼저 처리했으면 바뀐 수가 모자라므로 전부 되돌린다.
+            updated = Prescription.objects.filter(id__in=prescription_ids, is_dispensed=False).update(
+                is_dispensed=True, dispensed_at=timezone.now(),
+            )
+            if updated != len(prescription_ids):
+                raise ValidationError({'detail': '다른 기기에서 이미 수령 처리했습니다. 목록을 새로고침하세요.'})
 
-                if mission_stock.remaining_qty < prescription_drug.quantity:
+            for stock_id, qty in demand.items():
+                ok =MissionStock.objects.filter(id=stock_id, remaining_qty__gte=qty).update(
+                    remaining_qty=F('remaining_qty') - qty,
+                )
+                if not ok:
+                    stock = stocks[stock_id]
+                    stock.refresh_from_db(fields=['remaining_qty'])
                     raise ValidationError({
-                        'detail': f"{prescription_drug.drug.name} 재고가 부족합니다. "
-                                  f"(잔량 {mission_stock.remaining_qty}, 필요 {prescription_drug.quantity})"
+                        'detail': f'{stock.drugbatch.drug.name} (유통기한 {stock.drugbatch.expiry_date}) 재고가 부족합니다. '
+                                  f'(잔량 {stock.remaining_qty}, 필요 {qty})'
                     })
 
-                mission_stock.remaining_qty -= prescription_drug.quantity
-                mission_stock.save()
-
-            Prescription.objects.filter(
-                visit_department__visit_id=visit_id, is_dispensed=False
-            ).update(is_dispensed=True)
+            for drug_item_id, stock_id in chosen.items():
+                PrescriptionDrug.objects.filter(id=drug_item_id).update(dispensed_stock_id=stock_id)
 
         return Response({'detail': '수령 처리가 완료되었습니다.'})
 
 
+class UndispenseView(APIView):
+    """수령 취소 - 이 방문의 수령된 처방을 전부 조제 대기로 되돌리고, 조제할 때 뺀 배치에 재고를 돌려준다 (오늘 방문만)"""
+    permission_classes = [IsPharmacyTeam]
+
+    def post(self, request, visit_id):
+        visit = get_pharmacy_visit(request.user, visit_id)
+        prescription_ids = list(
+            Prescription.objects.filter(visit_department__visit=visit, is_dispensed=True).values_list('id', flat=True)
+        )
+        if not prescription_ids:
+            raise ValidationError({'detail': '수령 처리된 처방이 없습니다. 이미 취소되었을 수 있습니다.'})
+
+        items = PrescriptionDrug.objects.filter(prescription_id__in=prescription_ids).select_related('drug', 'dispensed_stock')
+        restore = defaultdict(int)
+        for item in items:
+            if item.dispensed_stock is None:
+                raise ValidationError({'detail': f'{item.drug.name}: 조제한 배치 기록이 없어 수령을 취소할 수 없습니다.'})
+            if item.dispensed_stock.is_settled:
+                raise ValidationError({'detail': f'{item.drug.name}: 이미 정산이 끝난 배치라 수령을 취소할 수 없습니다.'})
+            restore[item.dispensed_stock_id] += item.quantity
+
+        with transaction.atomic():
+            updated = Prescription.objects.filter(id__in=prescription_ids, is_dispensed=True).update(
+                is_dispensed=False, dispensed_at=None,
+            )
+            if updated != len(prescription_ids):
+                raise ValidationError({'detail': '다른 기기에서 이미 수령을 취소했습니다. 목록을 새로고침하세요.'})
+
+            for stock_id, qty in restore.items():
+                MissionStock.objects.filter(id=stock_id).update(remaining_qty=F('remaining_qty') + qty)
+            PrescriptionDrug.objects.filter(prescription_id__in=prescription_ids).update(dispensed_stock=None)
+
+        return Response({'detail': '수령을 취소했습니다. 조제 대기로 돌아갑니다.'})
+
+
 class PrescriptionDrugUpdateView(generics.UpdateAPIView):
-    """약국팀 - 조제 중 재고 불일치로 약품/수량 변경 (수량을 그대로 믿고 재계산하지 않음)"""
-    queryset = PrescriptionDrug.objects.all()
+    """
+    약국팀 - 재고가 모자랄 때 처방약 수량만 수정 (1 이상, 재계산하지 않음).
+    이번 미션 오늘 방문의, 진료 완료되고 아직 수령 전인 처방약만.
+    """
     serializer_class = PrescriptionDrugUpdateSerializer
     permission_classes = [IsPharmacyTeam]
+
+    def get_queryset(self):
+        mission = get_current_mission(self.request.user)
+        return PrescriptionDrug.objects.filter(
+            prescription__visit_department__visit__mission=mission,
+            prescription__visit_department__visit__visit_date=timezone.localdate(),
+        ).select_related('prescription__visit_department')
+
+    def perform_update(self, serializer):
+        prescription = serializer.instance.prescription
+        if prescription.is_dispensed:
+            raise ValidationError({'detail': '이미 수령 처리된 처방약은 수정할 수 없습니다. [수령 취소] 후 수정하세요.'})
+        if not prescription.visit_department.is_done:
+            raise ValidationError({'detail': '진료가 끝나지 않은 처방약은 수정할 수 없습니다.'})
+        serializer.save()

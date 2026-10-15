@@ -44,10 +44,19 @@ async function apiFetch(path, options = {}) {
         throw new Error('로그인이 만료되었습니다. 다시 로그인해주세요.');
     }
 
-    const data = await response.json();
+    // 500 오류 페이지처럼 JSON이 아닌 응답이 오면 null (그대로 json()하면 "Unexpected token '<'"가 화면에 뜬다)
+    let data = null;
+    try {
+        data = await response.json();
+    } catch {
+        data = null;
+    }
 
     if (!response.ok) {
-        throw new Error(formatApiError(data));
+        throw new Error(data ? formatApiError(data) : `서버 오류가 발생했습니다. (${response.status}) 잠시 후 다시 시도해주세요.`);
+    }
+    if (data === null) {
+        throw new Error('서버 응답을 읽을 수 없습니다. 잠시 후 다시 시도해주세요.');
     }
 
     return data;

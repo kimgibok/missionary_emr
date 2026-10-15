@@ -4,19 +4,147 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ 약국팀 }} · 의료선교 EMR</title>
+    <title>약국팀 · 의료선교 EMR</title>
     <link rel="stylesheet" href="{% static_v 'css/base.css' %}">
     <link rel="stylesheet" href="{% static_v 'css/nav.css' %}">
     <link rel="stylesheet" href="{% static_v 'css/page.css' %}">
+    <link rel="stylesheet" href="{% static_v 'css/modal.css' %}">
+    <link rel="stylesheet" href="{% static_v 'css/reception.css' %}">
+    <link rel="stylesheet" href="{% static_v 'css/clinical.css' %}">
+    <link rel="stylesheet" href="{% static_v 'css/pharmacy.css' %}">
 </head>
 <body>
     {% include 'partials/nav.html' %}
     <main class="page-content">
-        <h1>{{ 약국팀 }}</h1>
-        <p style="color: var(--color-text-muted); margin-top: 8px;">준비중입니다.</p>
+        <h1>약국팀</h1>
+
+        <div class="tab-bar" role="tablist" aria-label="약국 화면">
+            <button type="button" class="tab-button" role="tab" data-tab="dispense">조제</button>
+            <button type="button" class="tab-button" role="tab" data-tab="stock">재고</button>
+            <button type="button" class="tab-button" role="tab" data-tab="stats">통계</button>
+        </div>
+
+        <!-- ===== 조제 탭 ===== -->
+        <div class="tab-panel" id="tab-dispense" role="tabpanel">
+        <section class="card">
+            <div class="card-head">
+                <h2 class="card-title">조제 대기</h2>
+                <div class="card-head-side">
+                    <select class="field-input paper-select" id="paper-select" aria-label="조제지 용지">
+                        <option value="receipt">영수증</option>
+                        <option value="a4">A4</option>
+                    </select>
+                    <label class="toggle autoprint-toggle"><input type="checkbox" id="autoprint-toggle"><span>자동 출력</span></label>
+                    <span class="count-badge" id="queue-count">0명</span>
+                </div>
+            </div>
+            <p class="autoprint-status" id="autoprint-status" hidden></p>
+            <p class="section-hint">진료가 모두 끝난 오늘 환자가 등록번호 순으로 보입니다. 눌러서 조제하세요.</p>
+            <div id="queue-list" class="queue-list"></div>
+        </section>
+
+        <section class="card">
+            <div class="card-head">
+                <h2 class="card-title">오늘 수령 완료</h2>
+                <span class="count-badge" id="done-count">0명</span>
+            </div>
+            <p class="section-hint">최근에 수령한 환자가 위에 보입니다. 잘못 처리했으면 눌러서 [수령 취소]할 수 있어요.</p>
+            <div id="done-list" class="queue-list"></div>
+        </section>
+
+        <section class="intake-panel" id="dispense-panel" hidden>
+            <div class="intake-header">
+                <div class="intake-ticket">
+                    <span class="intake-ticket-no ticket-number" id="dp-reg-no"></span>
+                    <span class="intake-ticket-label">등록번호</span>
+                </div>
+                <div class="intake-patient">
+                    <div class="intake-patient-name" id="dp-name"></div>
+                    <div class="intake-patient-meta" id="dp-meta"></div>
+                </div>
+                <div class="intake-actions">
+                    <button class="btn-secondary btn-small" id="dp-close-btn" type="button">닫기</button>
+                </div>
+            </div>
+
+            <p class="pharmacy-alert" id="dp-allergy" hidden></p>
+
+            <h3 class="form-section-title">처방 <span class="section-head-sub">처방약마다 꺼낼 배치를 고르세요</span></h3>
+            <div id="dp-prescriptions" class="prescription-list"></div>
+
+            <p class="error-message" id="dp-error"></p>
+            <div class="intake-actions clinical-footer-actions">
+                <button class="btn-secondary" type="button" id="dp-print-btn">조제지 출력</button>
+                <button class="btn-primary" type="button" id="dp-dispense-btn">수령 완료</button>
+            </div>
+        </section>
+
+        <section class="intake-panel" id="done-panel" hidden>
+            <div class="intake-header">
+                <div class="intake-ticket">
+                    <span class="intake-ticket-no ticket-number" id="dn-reg-no"></span>
+                    <span class="intake-ticket-label">등록번호</span>
+                </div>
+                <div class="intake-patient">
+                    <div class="intake-patient-name" id="dn-name"></div>
+                    <div class="intake-patient-meta" id="dn-meta"></div>
+                </div>
+                <div class="intake-actions">
+                    <button class="btn-secondary btn-small" id="dn-close-btn" type="button">닫기</button>
+                </div>
+            </div>
+
+            <h3 class="form-section-title">수령한 처방 <span class="section-head-sub">약마다 꺼낸 배치</span></h3>
+            <div id="dn-prescriptions" class="prescription-list"></div>
+
+            <div class="intake-actions clinical-footer-actions">
+                <button class="btn-secondary" type="button" id="dn-undispense-btn">수령 취소</button>
+            </div>
+        </section>
+        <div id="panel-dock"></div>
+        </div>
+
+        <!-- ===== 재고 탭 ===== -->
+        <div class="tab-panel" id="tab-stock" role="tabpanel" hidden>
+            <section class="card">
+                <div class="card-head">
+                    <h2 class="card-title">이번 미션 재고</h2>
+                    <button class="btn-secondary btn-small" type="button" id="stock-refresh-btn">새로고침</button>
+                </div>
+                <p class="section-hint" id="stock-summary">배치마다 현장 잔량 / 챙겨 온 양을 보여줍니다.</p>
+                <input class="field-input" type="search" id="stock-search" placeholder="약 이름·성분으로 찾기">
+                <div id="stock-list" class="stock-list"></div>
+            </section>
+        </div>
+
+        <!-- ===== 통계 탭 ===== -->
+        <div class="tab-panel" id="tab-stats" role="tabpanel" hidden>
+            <section class="card">
+                <div class="card-head">
+                    <h2 class="card-title">약품 사용량</h2>
+                    <span class="count-badge" id="stats-count">0종</span>
+                </div>
+                <p class="section-hint">고른 날짜에 수령 처리된 약의 합계입니다. (수령 취소한 건은 빠집니다)</p>
+                <div class="stats-date-row">
+                    <label class="field-label" for="stats-date">날짜</label>
+                    <input class="field-input" type="date" id="stats-date">
+                </div>
+                <div id="stats-list"></div>
+            </section>
+        </div>
     </main>
 
+    <!-- 인쇄할 때만 보이는 조제지 (pharmacy.css의 @media print). 용지 크기(@page)는 pharmacy.js가 #page-style에 넣는다 -->
+    <div class="print-area" id="print-area"></div>
+    <style id="page-style"></style>
+
+    {% include 'partials/modal.html' %}
+    <div class="toast" id="toast" role="status"></div>
+
     <script src="{% static_v 'js/api.js' %}"></script>
+    <script src="{% static_v 'js/common.js' %}"></script>
     <script src="{% static_v 'js/nav.js' %}"></script>
+    <script src="{% static_v 'js/modal.js' %}"></script>
+    <script src="{% static_v 'js/pharmacy.js' %}"></script>
 </body>
 </html>
