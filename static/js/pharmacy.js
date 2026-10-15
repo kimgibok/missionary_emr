@@ -8,6 +8,9 @@
 //   6. 조제지 출력 (자동 출력 PC에서 새 환자를 자동 인쇄 + 패널의 [조제지 출력])
 //   7. 재고 문제 경고창 · 소리
 //   8. 오늘 수령 완료 목록 · 수령 취소
+//   9. 탭 (조제 | 재고 | 통계) - 자동 출력·경고음은 어느 탭에서든 계속 동작
+//  10. 재고 탭
+//  11. 통계 탭
 // 목록을 innerHTML로 다시 그리기 전에 패널을 #panel-dock으로 옮겨 둔다 (안 그러면 패널이 DOM에서 떨어져 나간다)
 // escapeHtml, patientMeta, doctorLabel, showToast, byId는 common.js
 // =====================================================
@@ -16,6 +19,8 @@ const REFRESH_MS = 10000;
 const ALARM_REPEAT_MS = 10000;               // 경고창을 확인할 때까지 소리를 다시 울리는 간격
 const AUTOPRINT_KEY = 'pharmacy_autoprint';  // 이 기기에서 자동 출력을 켰는지 (localStorage)
 const PAPER_KEY = 'pharmacy_paper';          // 이 기기의 조제지 용지 'receipt' | 'a4' (localStorage)
+const TAB_KEY = 'pharmacy_tab';              // 마지막으로 본 탭 (localStorage)
+const LOW_STOCK_RATIO = 0.2;                 // 챙겨 온 양의 20% 이하로 남으면 '부족' 표시
 // 용지별 @page. 영수증은 크기를 정하지 않아(auto) 프린터 드라이버의 기본 용지(80mm·58mm 감열지)를 따른다.
 const PAGE_STYLES = {
     receipt: '@page { size: auto; margin: 0; }',
@@ -30,6 +35,9 @@ let queueSignature = '';        // 목록이 바뀌었는지 비교용
 let doneData = null;            // 오늘 수령 완료 목록 - 서버 응답 그대로
 let doneSignature = '';
 let currentDone = null;         // 지금 열려 있는 수령 완료 환자 (목록 항목 그대로)
+let activeTab = 'dispense';     // 'dispense' | 'stock' | 'stats'
+let stockData = [];             // 재고 탭 - 이번 미션 배치 전부
+let stockSignature = '';
 let renderPending = false;      // 배치를 고르는 중이라 목록 갱신을 미뤄둔 상태
 let currentVisit = null;        // 지금 열려 있는 환자의 조제 정보 (dispense-options 응답)
 let batchChoice = new Map();    // 처방약 id → 고른 배치(mission_stock) id
@@ -136,7 +144,10 @@ async function refreshAll(force = false) {
     // 자동 출력 PC는 다른 창에 가려져 있어도 계속 확인한다
     if (document.hidden && !force && !isAutoPrintOn()) return;
     try {
-        await Promise.all([loadQueue(), loadDone()]);
+        // 조제 목록은 탭과 상관없이 갱신한다 (자동 출력이 이 목록을 보고 인쇄하므로)
+        const loads = [loadQueue(), loadDone()];
+        if (activeTab === 'stock') loads.push(loadStock());
+        await Promise.all(loads);
         if (isAutoPrintOn()) await autoPrintNew();
     } catch (err) {
         console.error(err);
@@ -837,6 +848,155 @@ byId('dn-undispense-btn').addEventListener('click', requestUndispense);
 
 
 // =====================================================
+// 9. 탭 (조제 | 재고 | 통계)
+// =====================================================
+
+const TABS = ['dispense', 'stock', 'stats'];
+
+// 이 기기 날짜 "2026-10-15" (통계 기본 날짜, 재고 유통기한 비교용)
+function todayStr() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function showTab(tab) {
+    activeTab = TABS.includes(tab) ? tab : 'dispense';
+    localStorage.setItem(TAB_KEY, activeTab);
+    document.querySelectorAll('.tab-button').forEach((btn) => {
+        const on = btn.dataset.tab === activeTab;
+        btn.classList.toggle('active', on);
+        btn.setAttribute('aria-selected', String(on));
+    });
+    TABS.forEach((t) => { byId(`tab-${t}`).hidden = t !== activeTab; });
+
+    if (activeTab === 'stock') loadStockSafely();
+    if (activeTab === 'stats') loadStats();
+}
+
+document.querySelector('.tab-bar').addEventListener('click', (e) => {
+    const btn = e.target.closest('.tab-button');
+    if (btn) showTab(btn.dataset.tab);
+});
+
+
+// =====================================================
+// 10. 재고 탭 - 이번 미션 배치 전부를 받아 화면에서 검색한다
+// =====================================================
+
+function stockBatchHtml(s) {
+    const today = todayStr();
+    let state = '';
+    let tag = '';
+    if (s.is_settled) {
+        state = ' is-settled';
+        tag = '<span class="doctor-tag waiting">정산됨</span>';
+    } else if (s.remaining_qty === 0) {
+        state = ' is-empty';
+        tag = '<span class="doctor-tag unassigned">소진</span>';
+    } else if (s.remaining_qty <= s.allocated_qty * LOW_STOCK_RATIO) {
+        state = ' is-low';
+        tag = '<span class="doctor-tag unassigned">부족</span>';
+    }
+    const expired = s.expiry_date < today ? ' (지남)' : '';
+    return `
+        <div class="stock-batch${state}">
+            <span class="stock-batch-info">유통기한 ${escapeHtml(s.expiry_date)}${expired} · ${escapeHtml(s.source)}</span>
+            ${tag}
+            <span class="stock-batch-qty">${s.remaining_qty} <small>/ ${s.allocated_qty}</small></span>
+        </div>`;
+}
+
+function renderStock() {
+    const keyword = byId('stock-search').value.trim().toLowerCase();
+    const rows = stockData.filter((s) => !keyword
+        || s.drug_name.toLowerCase().includes(keyword)
+        || (s.ingredient || '').toLowerCase().includes(keyword));
+
+    // 서버가 약 이름·유통기한 순으로 주므로 순서대로 약 이름별로 묶는다
+    const groups = [];
+    rows.forEach((s) => {
+        const last = groups[groups.length - 1];
+        if (last && last.name === s.drug_name) {
+            last.batches.push(s);
+        } else {
+            groups.push({ name: s.drug_name, ingredient: s.ingredient, batches: [s] });
+        }
+    });
+
+    const shortCount = stockData.filter((s) => !s.is_settled && s.remaining_qty <= s.allocated_qty * LOW_STOCK_RATIO).length;
+    byId('stock-summary').textContent =
+        `약 ${new Set(stockData.map((s) => s.drug_name)).size}종 · 배치 ${stockData.length}개 · 부족·소진 ${shortCount}개` +
+        ' (현장 잔량 / 챙겨 온 양)';
+
+    byId('stock-list').innerHTML = groups.length === 0
+        ? `<p class="empty-text">${keyword ? '찾는 약이 없습니다.' : '이번 미션에 등록된 재고가 없습니다.'}</p>`
+        : groups.map((g) => {
+            const total = g.batches.filter((s) => !s.is_settled).reduce((sum, s) => sum + s.remaining_qty, 0);
+            return `
+                <div class="stock-group">
+                    <div class="stock-group-head">
+                        <span class="stock-drug">${escapeHtml(g.name)}</span>
+                        <span class="stock-ingredient">${escapeHtml(g.ingredient)}</span>
+                        <span class="stock-total">합계 ${total}</span>
+                    </div>
+                    ${g.batches.map(stockBatchHtml).join('')}
+                </div>`;
+        }).join('');
+}
+
+async function loadStock() {
+    const data = await apiFetch('/mission-stocks/?page_size=500');
+    const signature = JSON.stringify(data.results);
+    if (signature === stockSignature) return;
+    stockSignature = signature;
+    stockData = data.results;
+    renderStock();
+}
+
+// 탭을 열거나 [새로고침]을 누를 때 - 실패하면 목록 자리에 오류 문구
+async function loadStockSafely() {
+    try {
+        await loadStock();
+    } catch (err) {
+        byId('stock-list').innerHTML = `<p class="empty-text is-error">${escapeHtml(err.message)}</p>`;
+    }
+}
+
+byId('stock-search').addEventListener('input', renderStock);
+byId('stock-refresh-btn').addEventListener('click', () => {
+    stockSignature = '';
+    loadStockSafely();
+});
+
+
+// =====================================================
+// 11. 통계 탭 - 고른 날짜에 수령 처리된 약의 합계
+// =====================================================
+
+async function loadStats() {
+    const date = byId('stats-date').value || todayStr();
+    const el = byId('stats-list');
+    try {
+        const rows = await apiFetch(`/prescription-drugs/daily-stats/?date=${encodeURIComponent(date)}`);
+        byId('stats-count').textContent = `${rows.length}종`;
+        el.innerHTML = rows.length === 0
+            ? '<p class="empty-text">이 날 수령 처리된 약이 없습니다.</p>'
+            : `<table class="stats-table">
+                   <thead><tr><th>약</th><th class="stats-qty">사용량</th></tr></thead>
+                   <tbody>${rows.map((r) => `
+                       <tr><td>${escapeHtml(r.drug_name)}</td><td class="stats-qty">${r.total_quantity}</td></tr>`).join('')}
+                   </tbody>
+               </table>`;
+    } catch (err) {
+        byId('stats-count').textContent = '0종';
+        el.innerHTML = `<p class="empty-text is-error">${escapeHtml(err.message)}</p>`;
+    }
+}
+
+byId('stats-date').addEventListener('change', loadStats);
+
+
+// =====================================================
 // 시작
 // =====================================================
 
@@ -844,6 +1004,8 @@ byId('autoprint-toggle').checked = localStorage.getItem(AUTOPRINT_KEY) === '1';
 byId('paper-select').value = localStorage.getItem(PAPER_KEY) === 'a4' ? 'a4' : 'receipt';
 applyPaper();
 updateAutoPrintStatus();
+byId('stats-date').value = todayStr();
+showTab(localStorage.getItem(TAB_KEY));
 
 document.addEventListener('visibilitychange', () => {
     if (!document.hidden) refreshAll(true);

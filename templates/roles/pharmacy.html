@@ -18,6 +18,14 @@
     <main class="page-content">
         <h1>약국팀</h1>
 
+        <div class="tab-bar" role="tablist" aria-label="약국 화면">
+            <button type="button" class="tab-button" role="tab" data-tab="dispense">조제</button>
+            <button type="button" class="tab-button" role="tab" data-tab="stock">재고</button>
+            <button type="button" class="tab-button" role="tab" data-tab="stats">통계</button>
+        </div>
+
+        <!-- ===== 조제 탭 ===== -->
+        <div class="tab-panel" id="tab-dispense" role="tabpanel">
         <section class="card">
             <div class="card-head">
                 <h2 class="card-title">조제 대기</h2>
@@ -94,6 +102,36 @@
             </div>
         </section>
         <div id="panel-dock"></div>
+        </div>
+
+        <!-- ===== 재고 탭 ===== -->
+        <div class="tab-panel" id="tab-stock" role="tabpanel" hidden>
+            <section class="card">
+                <div class="card-head">
+                    <h2 class="card-title">이번 미션 재고</h2>
+                    <button class="btn-secondary btn-small" type="button" id="stock-refresh-btn">새로고침</button>
+                </div>
+                <p class="section-hint" id="stock-summary">배치마다 현장 잔량 / 챙겨 온 양을 보여줍니다.</p>
+                <input class="field-input" type="search" id="stock-search" placeholder="약 이름·성분으로 찾기">
+                <div id="stock-list" class="stock-list"></div>
+            </section>
+        </div>
+
+        <!-- ===== 통계 탭 ===== -->
+        <div class="tab-panel" id="tab-stats" role="tabpanel" hidden>
+            <section class="card">
+                <div class="card-head">
+                    <h2 class="card-title">약품 사용량</h2>
+                    <span class="count-badge" id="stats-count">0종</span>
+                </div>
+                <p class="section-hint">고른 날짜에 수령 처리된 약의 합계입니다. (수령 취소한 건은 빠집니다)</p>
+                <div class="stats-date-row">
+                    <label class="field-label" for="stats-date">날짜</label>
+                    <input class="field-input" type="date" id="stats-date">
+                </div>
+                <div id="stats-list"></div>
+            </section>
+        </div>
     </main>
 
     <!-- 인쇄할 때만 보이는 조제지 (pharmacy.css의 @media print). 용지 크기(@page)는 pharmacy.js가 #page-style에 넣는다 -->

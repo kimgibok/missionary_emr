@@ -146,6 +146,142 @@
     color: var(--color-danger);
 }
 
+/* ---------- 탭 (조제 | 재고 | 통계) - 애플 세그먼트 컨트롤 모양 ---------- */
+.tab-bar {
+    display: flex;
+    gap: 4px;
+    padding: 4px;
+    margin: 16px 0 20px;
+    background: var(--color-border);
+    border-radius: 12px;
+}
+
+.tab-button {
+    flex: 1;
+    min-height: 44px;
+    border-radius: 9px;
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--color-text-muted);
+    transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.tab-button.active {
+    background: var(--color-surface);
+    color: var(--color-text);
+    font-weight: 600;
+    box-shadow: var(--shadow);
+}
+
+/* ---------- 재고 탭 ---------- */
+.stock-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.stock-group {
+    padding: 12px 14px;
+    background: var(--color-bg);
+    border-radius: 12px;
+}
+
+.stock-group-head {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    margin-bottom: 6px;
+}
+
+.stock-drug {
+    font-weight: 600;
+    font-size: 15px;
+}
+
+.stock-ingredient {
+    flex: 1;
+    min-width: 0;
+    font-size: 12px;
+    color: var(--color-text-muted);
+}
+
+.stock-total {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-accent);
+    font-variant-numeric: tabular-nums;
+}
+
+.stock-batch {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    padding: 8px 0;
+    border-top: 1px solid var(--color-border);
+    font-size: 13px;
+}
+
+.stock-batch-info {
+    flex: 1;
+    min-width: 160px;
+    color: var(--color-text-muted);
+}
+
+.stock-batch-qty {
+    font-size: 15px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.stock-batch-qty small {
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--color-text-muted);
+}
+
+.stock-batch.is-settled {
+    opacity: 0.5;
+}
+
+/* 부족·소진 배치 */
+.stock-batch.is-low .stock-batch-qty,
+.stock-batch.is-empty .stock-batch-qty {
+    color: var(--color-danger);
+}
+
+/* ---------- 통계 탭 ---------- */
+.stats-date-row {
+    max-width: 220px;
+}
+
+.stats-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+}
+
+.stats-table th,
+.stats-table td {
+    padding: 10px 4px;
+    border-bottom: 1px solid var(--color-border);
+    text-align: left;
+}
+
+.stats-table th {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--color-text-muted);
+}
+
+.stats-table .stats-qty {
+    width: 90px;
+    text-align: right;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
 
 /* =====================================================
    조제지 (환자 한 명당 한 장) - 화면에는 안 보이고 인쇄할 때만 나온다.
