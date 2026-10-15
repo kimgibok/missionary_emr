@@ -21,8 +21,12 @@
         <section class="card">
             <div class="card-head">
                 <h2 class="card-title">조제 대기</h2>
-                <span class="count-badge" id="queue-count">0명</span>
+                <div class="card-head-side">
+                    <label class="toggle autoprint-toggle"><input type="checkbox" id="autoprint-toggle"><span>자동 출력</span></label>
+                    <span class="count-badge" id="queue-count">0명</span>
+                </div>
             </div>
+            <p class="autoprint-status" id="autoprint-status" hidden></p>
             <p class="section-hint">진료가 모두 끝난 오늘 환자가 등록번호 순으로 보입니다. 눌러서 조제하세요.</p>
             <div id="queue-list" class="queue-list"></div>
         </section>
@@ -49,11 +53,15 @@
 
             <p class="error-message" id="dp-error"></p>
             <div class="intake-actions clinical-footer-actions">
+                <button class="btn-secondary" type="button" id="dp-print-btn">조제지 출력</button>
                 <button class="btn-primary" type="button" id="dp-dispense-btn">수령 완료</button>
             </div>
         </section>
         <div id="panel-dock"></div>
     </main>
+
+    <!-- 인쇄할 때만 보이는 조제지 (pharmacy.css의 @media print) -->
+    <div class="print-area" id="print-area"></div>
 
     {% include 'partials/modal.html' %}
     <div class="toast" id="toast" role="status"></div>

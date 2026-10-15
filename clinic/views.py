@@ -400,6 +400,16 @@ def get_pharmacy_visit(user, visit_id):
     return get_object_or_404(Visit, pk=visit_id, mission=mission, visit_date=timezone.localdate())
 
 
+def mission_stock_max(mission):
+    """{약 id: 이번 미션(정산 전) 배치 중 가장 많이 남은 잔량} - 조제지·목록의 '재고 확인' 표시용"""
+    return dict(
+        MissionStock.objects.filter(mission=mission, is_settled=False)
+        .values('drugbatch__drug_id')
+        .annotate(best=Max('remaining_qty'))
+        .values_list('drugbatch__drug_id', 'best')
+    )
+
+
 class MissionStockListView(generics.ListAPIView):
     """약국팀 재고 조회 - 현재 미션의 MissionStock, 약 이름·유통기한 순 (?search= 약 이름·성분)"""
     serializer_class = MissionStockSerializer
@@ -482,6 +492,38 @@ class PharmacyQueueView(generics.ListAPIView):
             .order_by('reg_no')
         )
 
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        mission = get_current_mission(self.request.user)
+        context['stock_max'] = mission_stock_max(mission) if mission else {}
+        return context
+
+
+class PrintClaimView(APIView):
+    """
+    조제지 자동 출력 - body {"ids": [방문 id, ...]} 중 아직 출력하지 않은 것만 '출력함'으로 바꾸고 그 id만 돌려준다.
+    자동 출력을 켠 기기가 둘이어도 먼저 가져간 쪽만 출력하게 된다.
+    """
+    permission_classes = [IsPharmacyTeam]
+
+    def post(self, request):
+        ids = request.data.get('ids', [])
+        if not isinstance(ids, list) or not all(isinstance(i, int) for i in ids):
+            raise ValidationError({'detail': 'ids는 방문 번호 목록이어야 합니다.'})
+        mission = get_current_mission(request.user)
+        if mission is None or not ids:
+            return Response({'claimed': []})
+
+        # transaction_mode IMMEDIATE라 이 블록은 다른 쓰기 요청과 겹치지 않는다
+        with transaction.atomic():
+            claimed = list(
+                Visit.objects.filter(
+                    id__in=ids, mission=mission, visit_date=timezone.localdate(), slip_printed_at__isnull=True,
+                ).values_list('id', flat=True)
+            )
+            Visit.objects.filter(id__in=claimed).update(slip_printed_at=timezone.now())
+        return Response({'claimed': claimed})
+
 
 class PharmacyDoneView(generics.ListAPIView):
     """수령 완료 - 오늘 수령 처리된 처방이 있는 방문, 수령 시각 최신순 (수령된 처방만 담김)"""
@@ -517,7 +559,7 @@ class DispenseOptionsView(APIView):
 
     def get(self, request, visit_id):
         visit = get_pharmacy_visit(request.user, visit_id)
-        data = PharmacyVisitSerializer(visit).data
+        data = PharmacyVisitSerializer(visit, context={'stock_max': mission_stock_max(visit.mission)}).data
 
         drug_ids = {item['drug'] for p in data['prescriptions'] for item in p['items']}
         stocks = (

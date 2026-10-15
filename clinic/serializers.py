@@ -156,6 +156,9 @@ class VisitDepartmentDoneSerializer(serializers.ModelSerializer):
         # 완료 시각 기록 (완료 목록 최신순 정렬용), 완료 취소하면 비움
         if 'is_done' in validated_data:
             validated_data['done_at'] = timezone.now() if validated_data['is_done'] else None
+        if validated_data.get('is_done') is False:
+            # 처방을 고쳐 다시 완료하면 수정된 조제지가 약국에서 자동으로 다시 출력되게
+            Visit.objects.filter(pk=instance.visit_id).update(slip_printed_at=None)
         return super().update(instance, validated_data)
 
 
@@ -304,17 +307,50 @@ class PharmacyPrescriptionSerializer(serializers.ModelSerializer):
         return doctor.name or doctor.username
 
 
+def find_stock_issues(prescriptions, stock_max):
+    """
+    조제 전에 의사 확인이 필요한 처방약 목록 - 조제지·자동 출력 경고·목록 태그용.
+    prescriptions: 직렬화된 처방 목록, stock_max: {약 id: 이번 미션(정산 전) 배치 중 가장 많이 남은 잔량}
+    유통기한이 지난 배치는 현장 판단에 맡기므로 문제로 보지 않는다.
+    """
+    issues = []
+    for prescription in prescriptions:
+        for item in prescription['items']:
+            best = stock_max.get(item['drug'])
+            if item['quantity'] == 0:
+                message = '수량 0 (처방 확인 필요)'
+            elif best is None:
+                message = '이번 미션 재고에 없음'
+            elif best < item['quantity']:
+                message = f"재고 부족 (필요 {item['quantity']}, 가장 많이 남은 배치 {best})"
+            else:
+                continue
+            issues.append({'prescription_drug': item['id'], 'drug_name': item['drug_name'], 'message': message})
+    return issues
+
+
 class PharmacyVisitSerializer(serializers.ModelSerializer):
     """
     약국팀 환자(방문) 단위 표현 - 조제 대기 / 수령 완료 목록 / 조제 화면 공용.
     context['dispensed']가 True면 수령된 처방만, 아니면 미수령 처방만 담는다.
+    context['stock_max']가 있으면 stock_issues(재고 확인이 필요한 약)를 같이 담는다.
     """
     patient = PatientSerializer(read_only=True)
     prescriptions = serializers.SerializerMethodField()
 
     class Meta:
         model = Visit
-        fields = ['id', 'reg_no', 'visit_date', 'patient', 'weight', 'has_allergy', 'allergy_detail', 'prescriptions']
+        fields = [
+            'id', 'reg_no', 'visit_date', 'patient', 'weight', 'has_allergy', 'allergy_detail',
+            'slip_printed_at', 'prescriptions',
+        ]
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        stock_max = self.context.get('stock_max')
+        if stock_max is not None:
+            data['stock_issues'] = find_stock_issues(data['prescriptions'], stock_max)
+        return data
 
     def get_prescriptions(self, obj):
         qs = (

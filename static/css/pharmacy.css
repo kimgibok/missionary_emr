@@ -12,6 +12,29 @@
     color: var(--color-danger);
 }
 
+/* ---------- 자동 출력 스위치 ---------- */
+.card-head-side {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.autoprint-status {
+    padding: 10px 14px;
+    margin-bottom: 14px;
+    background: rgba(58, 125, 92, 0.10);
+    border-radius: 12px;
+    font-size: 13px;
+    color: var(--color-success);
+}
+
+/* 소리가 아직 막혀 있을 때 (새로고침 후 화면을 한 번 눌러야 함) */
+.autoprint-status.is-warning {
+    background: rgba(178, 58, 46, 0.08);
+    color: var(--color-danger);
+    font-weight: 600;
+}
+
 /* 목록 오른쪽 요약 태그 묶음 */
 .queue-item-tags {
     display: flex;
@@ -88,4 +111,211 @@
     margin-top: 4px;
     font-size: 13px;
     color: var(--color-text-muted);
+}
+
+/* 경고창의 문제 목록 */
+.alarm-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 4px;
+    list-style: none;
+}
+
+.alarm-list li {
+    padding: 10px 12px;
+    background: rgba(178, 58, 46, 0.08);
+    border-radius: 10px;
+    font-size: 14px;
+    color: var(--color-text);
+}
+
+.alarm-list strong {
+    color: var(--color-danger);
+}
+
+
+/* =====================================================
+   조제지 (A4, 환자 한 명당 한 장) - 화면에는 안 보이고 인쇄할 때만 나온다.
+   흑백 프린터 기준이라 색 대신 굵기·테두리로 구분한다.
+   ===================================================== */
+.print-area {
+    display: none;
+}
+
+@media print {
+    @page {
+        size: A4;
+        margin: 14mm;
+    }
+
+    body {
+        background: #fff;
+    }
+
+    /* 조제지 말고는 전부 숨김 (nav, 화면, 모달, 토스트) */
+    body > *:not(.print-area) {
+        display: none !important;
+    }
+
+    .print-area {
+        display: block;
+    }
+}
+
+.slip {
+    color: #000;
+    font-size: 11pt;
+    line-height: 1.45;
+    break-after: page;
+}
+
+.slip:last-child {
+    break-after: auto;
+}
+
+.slip-header {
+    display: flex;
+    align-items: center;
+    gap: 14pt;
+    padding-bottom: 10pt;
+    margin-bottom: 12pt;
+    border-bottom: 1.5pt solid #000;
+}
+
+.slip-ticket {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 70pt;
+    padding: 4pt 10pt;
+    border: 1.5pt dashed #000;
+    border-radius: 8pt;
+}
+
+.slip-ticket-no {
+    font-size: 30pt;
+    font-weight: 700;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+}
+
+.slip-ticket-label {
+    font-size: 8pt;
+}
+
+.slip-patient {
+    flex: 1;
+}
+
+.slip-name {
+    font-size: 18pt;
+    font-weight: 700;
+}
+
+.slip-meta {
+    font-size: 10pt;
+}
+
+.slip-title {
+    font-size: 14pt;
+    font-weight: 700;
+    letter-spacing: 0.2em;
+}
+
+.slip-allergy,
+.slip-warning {
+    padding: 8pt 10pt;
+    margin-bottom: 10pt;
+    border: 2.5pt solid #000;
+    border-radius: 6pt;
+    font-weight: 700;
+}
+
+.slip-warning ul {
+    margin: 4pt 0 0 14pt;
+    font-weight: 600;
+}
+
+.slip-rx {
+    margin-bottom: 14pt;
+    break-inside: avoid;
+}
+
+.slip-rx-head {
+    font-size: 12pt;
+    font-weight: 700;
+    margin-bottom: 2pt;
+}
+
+.slip-rx-note {
+    font-size: 10pt;
+    margin-bottom: 4pt;
+    white-space: pre-line;
+}
+
+.slip-no-drug {
+    font-size: 10pt;
+}
+
+/* 처방이 여러 건이어도 표마다 열 너비가 같게 (약 | 수량 | 복용법 | 조제) */
+.slip-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+}
+
+.slip-table th:nth-child(1) { width: 36%; }
+.slip-table th:nth-child(2) { width: 50pt; }
+.slip-table th:nth-child(4) { width: 40pt; }
+
+.slip-table th,
+.slip-table td {
+    padding: 5pt 6pt;
+    border: 0.75pt solid #000;
+    text-align: left;
+    vertical-align: middle;
+}
+
+.slip-table th {
+    font-size: 9pt;
+    font-weight: 600;
+}
+
+.slip-table .slip-qty {
+    font-size: 13pt;
+    font-weight: 700;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
+
+.slip-table .slip-check {
+    text-align: center;
+}
+
+.slip-table td {
+    overflow-wrap: anywhere;
+}
+
+/* 재고 문제가 있는 약은 굵게 + 표시 */
+.slip-table tr.has-issue td {
+    font-weight: 700;
+}
+
+.slip-issue-mark {
+    font-size: 9pt;
+    font-weight: 700;
+}
+
+.slip-checkbox {
+    display: inline-block;
+    width: 12pt;
+    height: 12pt;
+    border: 1pt solid #000;
+}
+
+.slip-footer {
+    margin-top: 16pt;
+    font-size: 9pt;
+    text-align: right;
 }

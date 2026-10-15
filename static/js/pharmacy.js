@@ -5,10 +5,14 @@
 //   3. 처방약마다 배치 선택
 //   4. 수량 수정 (재고가 모자랄 때만, 1 이상)
 //   5. 수령 처리
+//   6. 조제지 출력 (자동 출력 PC에서 새 환자를 자동 인쇄 + 패널의 [조제지 출력])
+//   7. 재고 문제 경고창 · 소리
 // escapeHtml, patientMeta, doctorLabel, showToast, byId는 common.js
 // =====================================================
 
 const REFRESH_MS = 10000;
+const ALARM_REPEAT_MS = 10000;               // 경고창을 확인할 때까지 소리를 다시 울리는 간격
+const AUTOPRINT_KEY = 'pharmacy_autoprint';  // 이 기기에서 자동 출력을 켰는지 (localStorage)
 const dispensePanel = byId('dispense-panel');
 
 // ----- 상태 -----
@@ -18,6 +22,11 @@ let renderPending = false;      // 배치를 고르는 중이라 목록 갱신�
 let currentVisit = null;        // 지금 열려 있는 환자의 조제 정보 (dispense-options 응답)
 let batchChoice = new Map();    // 처방약 id → 고른 배치(mission_stock) id
 let isBusy = false;             // 저장 요청 중이면 자동 새로고침·중복 클릭을 막음
+
+let isPrinting = false;         // 자동 출력 중복 실행 방지
+let audioCtx = null;            // 경고음 - 사용자가 한 번 눌러야 브라우저가 소리를 허락한다
+let alarmTimer = null;          // 경고창을 확인할 때까지 소리 반복
+let alarmEntries = [];          // 경고창에 띄운 재고 문제 [{ visit, issues }]
 
 
 // =====================================================
@@ -34,6 +43,7 @@ function queueItemHtml(v) {
     const drugCount = allItems(v).length;
     const drugTag = drugCount === 0 ? '약 없음' : `약 ${drugCount}종`;
     const allergyTag = v.has_allergy ? '<span class="doctor-tag unassigned">알레르기</span>' : '';
+    const stockTag = v.stock_issues.length > 0 ? '<span class="doctor-tag unassigned">재고 확인</span>' : '';
     return `
         <button type="button" class="queue-item${selected}" data-visit-id="${v.id}">
             <span class="queue-item-no ticket-number">${v.reg_no}</span>
@@ -43,6 +53,7 @@ function queueItemHtml(v) {
             </span>
             <span class="queue-item-tags">
                 ${allergyTag}
+                ${stockTag}
                 <span class="doctor-tag waiting">처방 ${v.prescriptions.length}건 · ${drugTag}</span>
             </span>
         </button>`;
@@ -109,9 +120,11 @@ async function loadQueue() {
 
 async function refreshAll(force = false) {
     if (isBusy) return;
-    if (document.hidden && !force) return;
+    // 자동 출력 PC는 다른 창에 가려져 있어도 계속 확인한다
+    if (document.hidden && !force && !isAutoPrintOn()) return;
     try {
         await loadQueue();
+        if (isAutoPrintOn()) await autoPrintNew();
     } catch (err) {
         console.error(err);
         if (force) showToast(err.message, true);
@@ -408,8 +421,240 @@ byId('dp-dispense-btn').addEventListener('click', requestDispense);
 
 
 // =====================================================
+// 6. 조제지 출력
+//    자동 출력을 켠 기기만 새 환자를 인쇄한다. 서버(print-claim)가 '출력함'을 먼저 가져간 기기에만 주므로
+//    두 기기에서 켜도 한 장만 나온다. 확인창 없이 바로 인쇄하려면 크롬을 --kiosk-printing으로 실행한다.
+// =====================================================
+
+function isAutoPrintOn() {
+    return byId('autoprint-toggle').checked;
+}
+
+function nowTimeLabel() {
+    const d = new Date();
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+// 환자 한 명의 조제지 (escape된 HTML)
+function slipHtml(v) {
+    const issues = v.stock_issues || [];
+    const issueIds = new Set(issues.map((x) => x.prescription_drug));
+    const meta = patientMeta(v) + (v.weight ? ` · ${v.weight}kg` : '');
+
+    const allergy = v.has_allergy
+        ? `<div class="slip-allergy">알레르기: ${escapeHtml(v.allergy_detail || '있음 (상세 미입력)')}</div>`
+        : '';
+    const warning = issues.length > 0
+        ? `<div class="slip-warning">조제 전 의사 확인 필요
+               <ul>${issues.map((x) => `<li>${escapeHtml(x.drug_name)}: ${escapeHtml(x.message)}</li>`).join('')}</ul>
+           </div>`
+        : '';
+
+    const rows = (p) => p.items.map((i) => `
+        <tr${issueIds.has(i.id) ? ' class="has-issue"' : ''}>
+            <td>${escapeHtml(i.drug_name)}${issueIds.has(i.id) ? ' <span class="slip-issue-mark">[확인 필요]</span>' : ''}</td>
+            <td class="slip-qty">${i.quantity}</td>
+            <td>${escapeHtml(dosageText(i)) || '-'}</td>
+            <td class="slip-check"><span class="slip-checkbox"></span></td>
+        </tr>`).join('');
+
+    const prescriptions = v.prescriptions.map((p) => `
+        <section class="slip-rx">
+            <h3 class="slip-rx-head">${doctorLabel(p.doctor_name, p.department_name)}</h3>
+            ${p.clinical_note ? `<p class="slip-rx-note">${escapeHtml(p.clinical_note)}</p>` : ''}
+            ${p.items.length === 0
+                ? '<p class="slip-no-drug">처방약 없음</p>'
+                : `<table class="slip-table">
+                       <thead><tr><th>약</th><th>수량</th><th>복용법</th><th>조제</th></tr></thead>
+                       <tbody>${rows(p)}</tbody>
+                   </table>`}
+        </section>`).join('');
+
+    return `
+        <article class="slip">
+            <header class="slip-header">
+                <div class="slip-ticket">
+                    <span class="slip-ticket-no">${v.reg_no}</span>
+                    <span class="slip-ticket-label">등록번호</span>
+                </div>
+                <div class="slip-patient">
+                    <div class="slip-name">${escapeHtml(v.patient.name_kr)}</div>
+                    <div class="slip-meta">${escapeHtml(meta)}</div>
+                </div>
+                <div class="slip-title">조제지</div>
+            </header>
+            ${allergy}
+            ${warning}
+            ${prescriptions}
+            <footer class="slip-footer">${escapeHtml(v.visit_date)} · 출력 ${nowTimeLabel()}</footer>
+        </article>`;
+}
+
+// 여러 명이면 한 사람에 한 장씩 이어서 인쇄. window.print()는 인쇄가 끝날 때까지 멈춘다.
+function printSlips(visits) {
+    byId('print-area').innerHTML = visits.map(slipHtml).join('');
+    window.print();
+}
+
+window.addEventListener('afterprint', () => {
+    byId('print-area').innerHTML = '';
+});
+
+// 아직 출력하지 않은 환자를 서버에서 '출력함'으로 가져와 인쇄하고, 재고 문제가 있으면 경고
+async function autoPrintNew() {
+    if (isPrinting || !queueData) return;
+    const pending = queueData.results.filter((v) => !v.slip_printed_at);
+    if (pending.length === 0) return;
+
+    isPrinting = true;
+    try {
+        const { claimed } = await apiFetch('/visits/print-claim/', {
+            method: 'POST',
+            body: JSON.stringify({ ids: pending.map((v) => v.id) }),
+        });
+        const visits = pending.filter((v) => claimed.includes(v.id));
+        if (visits.length === 0) return;
+
+        printSlips(visits);
+        const withIssues = visits.filter((v) => v.stock_issues.length > 0);
+        if (withIssues.length > 0) raiseStockAlarm(withIssues);
+    } catch (err) {
+        console.error(err);
+        showToast(`조제지 자동 출력 실패: ${err.message}`, true);
+    } finally {
+        isPrinting = false;
+    }
+}
+
+// 패널의 [조제지 출력] - 다시 출력하거나 수동으로 출력. 자동 출력 PC가 또 찍지 않게 '출력함'도 남긴다.
+async function printCurrent() {
+    if (!currentVisit) return;
+    const visit = currentVisit;
+    printSlips([visit]);
+    try {
+        await apiFetch('/visits/print-claim/', { method: 'POST', body: JSON.stringify({ ids: [visit.id] }) });
+    } catch (err) {
+        console.error(err);
+    }
+}
+
+byId('dp-print-btn').addEventListener('click', printCurrent);
+
+
+// =====================================================
+// 7. 재고 문제 경고창 · 소리 (자동 출력 PC)
+// =====================================================
+
+// 소리 허락받기 - 클릭 같은 사용자 동작 안에서 불러야 한다
+function ensureAudio() {
+    if (!audioCtx) {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return null;
+        audioCtx = new Ctx();
+        audioCtx.onstatechange = updateAutoPrintStatus;
+    }
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    return audioCtx;
+}
+
+function soundReady() {
+    return Boolean(audioCtx) && audioCtx.state === 'running';
+}
+
+// "삐-삐-삐" (소리 파일 없이 브라우저에서 만든다)
+function beep(times = 3) {
+    const ctx = audioCtx;
+    if (!ctx) return;
+    for (let k = 0; k < times; k++) {
+        const start = ctx.currentTime + k * 0.35;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'square';
+        osc.frequency.value = 880;
+        gain.gain.setValueAtTime(0.0001, start);
+        gain.gain.exponentialRampToValueAtTime(0.3, start + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.25);
+        osc.connect(gain).connect(ctx.destination);
+        osc.start(start);
+        osc.stop(start + 0.3);
+    }
+}
+
+function alarmBodyHtml() {
+    const lines = alarmEntries.flatMap(({ visit, issues }) => issues.map((x) => `
+        <li><strong>#${visit.reg_no} ${escapeHtml(visit.patient.name_kr)}</strong> ·
+            ${escapeHtml(x.drug_name)}: ${escapeHtml(x.message)}</li>`));
+    return `
+        <p class="modal-note">조제지에도 같이 찍혔습니다. 의사에게 확인해주세요.
+            약을 바꾸거나 빼야 하면 의사가 [완료 취소] 후 수정하고, 다시 완료하면 수정된 조제지가 자동으로 나옵니다.</p>
+        <ul class="alarm-list">${lines.join('')}</ul>`;
+}
+
+function stopAlarm() {
+    clearInterval(alarmTimer);
+    alarmTimer = null;
+    alarmEntries = [];
+}
+
+// 확인을 누를 때까지 소리를 반복. 이미 경고창이 떠 있으면 새 환자를 목록에 더한다.
+function raiseStockAlarm(visits) {
+    visits.forEach((visit) => {
+        alarmEntries = alarmEntries.filter((x) => x.visit.id !== visit.id);
+        alarmEntries.push({ visit, issues: visit.stock_issues });
+    });
+
+    openModal({
+        title: '재고 확인 필요',
+        bodyHtml: alarmBodyHtml(),
+        confirmLabel: '확인했어요',
+        onConfirm: () => { stopAlarm(); },
+    });
+    byId('modal-cancel').onclick = () => { stopAlarm(); closeModal(); };
+
+    beep();
+    clearInterval(alarmTimer);
+    alarmTimer = setInterval(() => beep(), ALARM_REPEAT_MS);
+}
+
+function updateAutoPrintStatus() {
+    const el = byId('autoprint-status');
+    if (!isAutoPrintOn()) {
+        el.hidden = true;
+        return;
+    }
+    el.hidden = false;
+    const ready = soundReady();
+    el.classList.toggle('is-warning', !ready);
+    el.textContent = ready
+        ? '이 기기에서 조제지를 자동 출력합니다. 재고 문제가 있으면 소리와 안내창으로 알려요.'
+        : '자동 출력 중 · 경고음을 켜려면 화면을 아무 곳이나 한 번 눌러주세요.';
+}
+
+byId('autoprint-toggle').addEventListener('change', () => {
+    if (isAutoPrintOn()) {
+        localStorage.setItem(AUTOPRINT_KEY, '1');
+        ensureAudio();
+        beep(1);    // 소리 확인용
+        refreshAll(true);
+    } else {
+        localStorage.removeItem(AUTOPRINT_KEY);
+        stopAlarm();
+    }
+    updateAutoPrintStatus();
+});
+
+// 새로고침 뒤에는 브라우저가 소리를 다시 막으므로, 화면을 처음 누를 때 허락받는다
+document.addEventListener('pointerdown', () => {
+    if (isAutoPrintOn() && !soundReady()) ensureAudio();
+});
+
+
+// =====================================================
 // 시작
 // =====================================================
+
+byId('autoprint-toggle').checked = localStorage.getItem(AUTOPRINT_KEY) === '1';
+updateAutoPrintStatus();
 
 document.addEventListener('visibilitychange', () => {
     if (!document.hidden) refreshAll(true);

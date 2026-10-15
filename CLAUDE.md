@@ -56,10 +56,10 @@ missionary_emr/
 │   ├─ roles/               info.html, reception.html, clinical.html, pharmacy.html, admin.html
 │   └─ partials/            nav.html, modal.html, patient_intake_modal.html
 ├─ static/
-│   ├─ css/                 base.css(토큰·공통 컴포넌트), login, nav, page, modal, info, reception, clinical
+│   ├─ css/                 base.css(토큰·공통 컴포넌트), login, nav, page, modal, info, reception, clinical, pharmacy(조제지 인쇄 포함)
 │   ├─ js/                  api.js, common.js(escapeHtml·showToast·patientMeta·doctorLabel·byId),
 │   │                       nav.js, modal.js, login.js, select_mission.js,
-│   │                       patient-intake.js, info.js, reception.js, clinical.js
+│   │                       patient-intake.js, info.js, reception.js, clinical.js, pharmacy.js
 │   └─ fonts/               Pretendard-{Regular,Medium,SemiBold,Bold}.woff2
 └─ db/emr.db                (gitignore)
 ```
@@ -119,6 +119,11 @@ superuser는 백엔드 권한을 전부 통과하므로 nav에서 모든 역할 
   모든 처방약에 배치가 필요하고 수량 0인 약이 있으면 수령을 막는다. 약 없는 처방(기도)은 배치 없이 수령된다.
   재고가 없어 약을 바꾸거나 빼야 하면 0으로 처리하지 않고, 의사가 [완료 취소] → 처방 수정 → 다시 완료한다(그동안 조제 대기에서 빠진다).
 - 수령 취소(`undispense`)는 오늘 방문만, 그 환자의 수령된 처방 전부를 대기로 되돌리고 `dispensed_stock`으로 재고를 돌려준다. 수령 후에는 의사의 [완료 취소]가 막히므로, 처방을 고치려면 약국 수령 취소 → 의사 완료 취소 순서다.
+- **조제지 자동 출력**: 약국 화면의 [자동 출력] 스위치를 켠 기기(프린터 PC, 설정은 기기별 `localStorage`)만, 조제 대기에 새로 올라온 환자의 조제지(A4, 환자당 한 장)를 인쇄한다.
+  `Visit.slip_printed_at`과 `POST visits/print-claim/`(아직 안 찍은 것만 '출력함'으로 바꾸고 그 id만 돌려줌)으로 기기가 둘이어도 한 장만 나온다.
+  의사가 [완료 취소]하면 `slip_printed_at`을 비워서 고친 처방이 다시 완료되면 자동으로 다시 나온다. 패널의 [조제지 출력]은 수동/재출력.
+  재고 문제(`stock_issues`: 미션 재고에 없음 / 처방 수량만큼 남은 배치 없음 / 수량 0)는 조제지에 찍히고, 출력 PC에 경고창 + 경고음([확인]까지 10초마다 반복), 모든 기기 목록에 '재고 확인' 태그.
+  확인창 없이 인쇄하려면 출력 PC의 크롬 바로가기에 `--kiosk-printing`을 붙인다. 브라우저는 클릭 전에는 소리를 막으므로 새로고침 후 화면을 한 번 눌러야 경고음이 난다.
 - 약국팀 처방약 수정은 **수량만(1 이상)**, 진료 완료·수령 전·오늘 방문만 된다. 약을 바꾸려면 의사가 [완료 취소] 후 수정한다.
 - SQLite는 `select_for_update()`를 무시한다. 수령·수령 취소는 조건부 UPDATE(`is_dispensed=False`인 것만, `remaining_qty__gte=필요량`) 후 바뀐 행 수를 확인해 동시 클릭을 막는다.
 - 의사별 대기 인원(`wait-counts`)은 이번 미션의 진료팀 멤버 전원을 보여주고(대기 0명 포함), **오늘 날짜** 미완료 배정만 센다.
@@ -137,7 +142,7 @@ superuser는 백엔드 권한을 전부 통과하므로 nav에서 모든 역할 
 | 처방 | `GET/POST prescriptions/` (`?visit_department=` 내 처방, `?visit=` 다른 의사 완료 처방), `PATCH/DELETE prescriptions/<pk>/` (진료과·진료내용 수정 / 처방 삭제), `POST prescription-drugs/` |
 | 처방약 수정 | `PATCH prescription-drugs/<pk>/` = 약국팀용(수량만 믿고 재계산 안 함), `PATCH/DELETE prescription-drugs/<pk>/clinical/` = 진료팀용(재계산됨) |
 | 조회용 | `GET departments/`, `drug-categories1/`, `drug-categories2/`, `drugs/` (진료팀 약 검색, MissionStock 기준, `?search=&cat1=&cat2=`) |
-| 약국 | `GET mission-stocks/`, `GET prescription-drugs/daily-stats/?date=`(수령된 약만), `GET visits/pharmacy-queue/`(오늘, 등록번호순), `GET visits/pharmacy-done/`(오늘 수령, 최신순), `GET visits/<id>/dispense-options/`, `POST visits/<id>/dispense/` `{items:[{prescription_drug, mission_stock}]}`, `POST visits/<id>/undispense/` |
+| 약국 | `GET mission-stocks/`, `GET prescription-drugs/daily-stats/?date=`(수령된 약만), `GET visits/pharmacy-queue/`(오늘, 등록번호순), `GET visits/pharmacy-done/`(오늘 수령, 최신순), `GET visits/<id>/dispense-options/`, `POST visits/<id>/dispense/` `{items:[{prescription_drug, mission_stock}]}`, `POST visits/<id>/undispense/`, `POST visits/print-claim/` `{ids}` → `{claimed}` (조제 대기·조제 화면 응답에 `slip_printed_at`, `stock_issues`) |
 | 관리자 `manage/` | `GET missions/`, `GET visits/stats/?mission=`, `GET mission-stocks/export/?mission=`, 그리고 라우터 CRUD: `drug-categories1`, `drug-categories2`, `drugs`, `drug-batches`, `mission-stocks` (`POST mission-stocks/<id>/settle/`) |
 
 권한 클래스(`clinic/permissions.py`): `IsInfoTeam`, `IsReceptionTeam`, `IsClinicalTeam`, `IsPharmacyTeam`와 조합용(`IsInfoOrReceptionTeam` 등).
@@ -211,8 +216,9 @@ POST처럼 대상 객체가 없는 요청은 뷰의 `perform_create`에서 `owns
 ## 10. 앞으로 할 일
 
 **다음 작업**
-- 약국팀 프론트엔드 (`feature/frontend-pharmacy`, 백엔드 1단계 완료) — 탭: 조제 대기 | 수령 완료 | 재고 | 통계
-  - 2단계 조제 대기(목록·조제 패널·배치 선택·수량 수정·수령) → 3단계 수령 완료·취소 → 4단계 재고·통계
+- 약국팀 프론트엔드 (`feature/frontend-pharmacy`) — 1단계 백엔드, 2단계 조제 대기, 2-1단계 조제지 자동 출력 완료
+  - 남은 것: 3단계 오늘 수령 완료 목록·수령 취소 → 4단계 재고·통계(이때 탭: 조제 | 재고 | 통계)
+  - 조제지 실제 프린터 출력은 아직 못 해 봤다(프린터 미정, A4 기준). 현장 프린터가 정해지면 `--kiosk-printing`과 용지에 맞춰 확인한다.
 
 **그 이후**
 - 관리자 프론트엔드 (미션 탭 통계, 약품/배치/미션재고 CRUD 화면, 정산, export 다운로드)
@@ -221,6 +227,7 @@ POST처럼 대상 객체가 없는 요청은 뷰의 `perform_create`에서 `owns
 - 약품 리스트 엑셀(`약품_리스트_아가페_2026_약품분류용1.xlsx`)을 `Drug`/`DrugCategory`/`DrugBatch`로 가져오는 `import_drugs` 관리 커맨드 (시트: 약속처방, 경구, 외용약, 비타민, 주사제, 소아, 추가약)
 - 진료 차트 양식(`고객등록카드(캄보디아) - 2025.hwp`)에 있는 치과 차트(Primary/Permanent teeth) 모델과 화면
 - 수술팀 워크플로우, 통계 문서 저장(PDF/엑셀) 같은 부가 기능
+- 환자용 그림 복용지도(아침/점심/저녁, 식전/식후 그림). 지금 처방에는 1회량·1일 횟수·일수와 약의 `usage` 글자뿐이라, 복용 시점을 처방 입력에 먼저 추가해야 한다.
 - 약국 조제 화면의 [의사에게 돌려보내기] 버튼(재고가 없어 처방을 바꿔야 할 때). 지금은 약국팀이 의사에게 말로 전하고 의사가 [완료 취소]한다.
 
 **보류 중인 개선**

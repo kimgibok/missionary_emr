@@ -112,6 +112,9 @@ class Visit(models.Model):
     chief_complaint = models.CharField(max_length=200, blank=True)
     symptom_duration = models.CharField(max_length=100, blank=True)
 
+    # 약국 조제지 자동 출력 시각 (출력 PC가 두 대여도 한 장만 나오게, 의사가 완료 취소하면 비워서 다시 출력)
+    slip_printed_at = models.DateTimeField(null=True, blank=True)
+
     class Meta:
         unique_together = ("mission", "visit_date", "reg_no")
 
