@@ -143,7 +143,7 @@ superuser는 백엔드 권한을 전부 통과하므로 nav에서 모든 역할 
 | 처방 | `GET/POST prescriptions/` (`?visit_department=` 내 처방, `?visit=` 다른 의사 완료 처방), `PATCH/DELETE prescriptions/<pk>/` (진료과·진료내용 수정 / 처방 삭제), `POST prescription-drugs/` |
 | 처방약 수정 | `PATCH prescription-drugs/<pk>/` = 약국팀용(수량만 믿고 재계산 안 함), `PATCH/DELETE prescription-drugs/<pk>/clinical/` = 진료팀용(재계산됨) |
 | 조회용 | `GET departments/`, `drug-categories1/`, `drug-categories2/`, `drugs/` (진료팀 약 검색, MissionStock 기준, `?search=&cat1=&cat2=`) |
-| 약국 | `GET mission-stocks/`, `GET prescription-drugs/daily-stats/?date=`(수령된 약만), `GET visits/pharmacy-queue/`(오늘, 등록번호순), `GET visits/pharmacy-done/`(오늘 수령, 최신순), `GET visits/<id>/dispense-options/`, `POST visits/<id>/dispense/` `{items:[{prescription_drug, mission_stock}]}`, `POST visits/<id>/undispense/`, `POST visits/print-claim/` `{ids}` → `{claimed}` (조제 대기·조제 화면 응답에 `slip_printed_at`, `stock_issues`) |
+| 약국 | `GET mission-stocks/`, `GET prescription-drugs/stats/?period=day&date= \| ?period=mission`(수령된 약만: summary·drugs + 미션 기준 runway), `GET visits/pharmacy-queue/`(오늘, 등록번호순), `GET visits/pharmacy-done/`(오늘 수령, 최신순), `GET visits/<id>/dispense-options/`, `POST visits/<id>/dispense/` `{items:[{prescription_drug, mission_stock}]}`, `POST visits/<id>/undispense/`, `POST visits/print-claim/` `{ids}` → `{claimed}` (조제 대기·조제 화면 응답에 `slip_printed_at`, `stock_issues`) |
 | 관리자 `manage/` | `GET missions/`, `GET visits/stats/?mission=`, `GET mission-stocks/export/?mission=`, 그리고 라우터 CRUD: `drug-categories1`, `drug-categories2`, `drugs`, `drug-batches`, `mission-stocks` (`POST mission-stocks/<id>/settle/`) |
 
 권한 클래스(`clinic/permissions.py`): `IsInfoTeam`, `IsReceptionTeam`, `IsClinicalTeam`, `IsPharmacyTeam`와 조합용(`IsInfoOrReceptionTeam` 등).
@@ -216,15 +216,17 @@ POST처럼 대상 객체가 없는 요청은 뷰의 `perform_create`에서 `owns
 - 약국팀 페이지 완료: 탭(조제 | 재고 | 통계, 마지막 탭 기억).
   조제 탭 = 조제 대기(알레르기·재고 확인 태그) → 조제 패널(복용법, 배치 선택, 수량 수정, 수령 완료) / 오늘 수령 완료(꺼낸 배치 보기, 수령 취소),
   조제지 자동 출력(기기별 [자동 출력]·용지 영수증/A4, 재고 문제 경고창·경고음) + 패널의 수동 출력.
-  재고 탭 = 이번 미션 배치를 약별로 묶어 잔량/챙겨 온 양, 부족(20% 이하)·소진·정산됨·유통기한 지남 표시, 검색. 통계 탭 = 날짜별 수령된 약 사용량.
+  재고 탭 = 이번 미션 배치를 약별로 묶어 잔량/챙겨 온 양, 부족(20% 이하)·소진·정산됨·유통기한 지남 표시, 검색. 통계 탭 = 하루/미션 전체 요약 숫자 4개·약별 사용량 + 재고 소진 예상(미션 기준, 미션 중 소진 경고).
 
 ## 10. 앞으로 할 일
 
 **다음 작업**
-- 약국 통계 보강 (`feature/pharmacy-stats`): ① 재고 소진 예상(남은 재고 ÷ 하루 평균 사용량 = 며칠 더 버티는지) ② 오늘 요약(수령 환자 수·처방 건수·약 종수·환자당 평균 약 종수)
-  ③ 기간 선택(하루 / 미션 전체). 분류별·진료과별 사용량, 그래프, 엑셀은 관리자 프론트엔드 통계와 같이 한다.
+- 약국 통계 탭의 재고 소진 예상: 약을 정해진 만큼만 가져가 현지에서 더 구하기 어려워, 미션 중에는 쓸모가 적을 수 있다.
+  현장 피드백을 받아 필요 없으면 뺀다(다음 미션 계획용 정보는 관리자 '다음 미션 준비표'로).
 - 조제지 실제 프린터 출력 확인: 아직 못 해 봤다(영수증 프린터 예정, 80mm·58mm·A4는 크롬 PDF로만 확인). 현장 프린터가 정해지면 `--kiosk-printing`과 드라이버 용지·자르기 설정을 같이 확인한다.
 - 관리자 프론트엔드 (미션 탭 통계, 약품/배치/미션재고 CRUD 화면, 정산, export 다운로드)
+  - 약 통계(미션 선택 가능, 엑셀 포함): 분류(cat1·cat2)별·진료과별 사용량, 그리고 다음 미션 준비표(약마다 챙겨 간 양·쓴 양·남은 양·하루 평균).
+    약국 화면은 "오늘 일하는 화면", 관리자는 "돌아보고 다음 미션을 계획하는 화면"으로 나눈다. 약국팀장도 필요하면 같은 API를 약국 탭에 붙인다.
   - 시간대 설정 화면: `SiteConfig`(행 1개, `time_zone`) 모델 + 요청마다 `timezone.activate()`하는 미들웨어 + 관리자 화면에서 선택.
     같은 화면에 "서버 기준 오늘 날짜·현재 시각·시간대"를 보여줘 설정 실수를 바로 알아보게 한다. 미션 중 변경은 확인 모달.
 - 약품 리스트 엑셀(`약품_리스트_아가페_2026_약품분류용1.xlsx`)을 `Drug`/`DrugCategory`/`DrugBatch`로 가져오는 `import_drugs` 관리 커맨드 (시트: 약속처방, 경구, 외용약, 비타민, 주사제, 소아, 추가약)

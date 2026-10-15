@@ -7,12 +7,12 @@ from .views import (
     PrescriptionDrugCreateView, DrugSearchView, DepartmentListView, PrescriptionListCreateView,
     PrescriptionDetailView, PrescriptionDrugClinicalUpdateView,
     DrugCategory1ListView, DrugCategory2ListView,
-    MissionStockListView, DailyDrugStatsView, PharmacyQueueView, PharmacyDoneView,
+    MissionStockListView, PharmacyStatsView, PharmacyQueueView, PharmacyDoneView,
     DispenseOptionsView, DispenseView, UndispenseView, PrescriptionDrugUpdateView, PrintClaimView,
 )
 
 
-# 고정 경로(pharmacy-queue/, daily-stats/ 등)는 같은 앞부분의 <int:pk>/보다 먼저 둔다
+# 고정 경로(pharmacy-queue/, stats/ 등)는 같은 앞부분의 <int:pk>/보다 먼저 둔다
 urlpatterns = [
     path('patients/', PatientListCreateView.as_view(), name='patient-list-create'),
     path('patients/<int:pk>/', PatientDetailView.as_view(), name='patient-detail'),
@@ -30,7 +30,7 @@ urlpatterns = [
     path('prescriptions/', PrescriptionListCreateView.as_view(), name='prescription-create'),
     path('prescriptions/<int:pk>/', PrescriptionDetailView.as_view(), name='prescription-detail'),
     path('prescription-drugs/', PrescriptionDrugCreateView.as_view(), name='prescription-drug-create'),
-    path('prescription-drugs/daily-stats/', DailyDrugStatsView.as_view(), name='daily-drug-stats'),
+    path('prescription-drugs/stats/', PharmacyStatsView.as_view(), name='pharmacy-stats'),
     path('prescription-drugs/<int:pk>/', PrescriptionDrugUpdateView.as_view(), name='prescription-drug-update'),
     path('prescription-drugs/<int:pk>/clinical/', PrescriptionDrugClinicalUpdateView.as_view(), name='prescription-drug-clinical-update'),
     path('drugs/', DrugSearchView.as_view(), name='drug-search'),
