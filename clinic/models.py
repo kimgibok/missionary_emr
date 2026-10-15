@@ -196,6 +196,7 @@ class Prescription(models.Model):
     department = models.ForeignKey(Department, on_delete=models.PROTECT, related_name="prescriptions")  # 진료 시점에 확정
     clinical_note = models.TextField(blank=True)
     is_dispensed = models.BooleanField(default=False)   # 약 수령 완료
+    dispensed_at = models.DateTimeField(null=True, blank=True)  # 수령 시각 (수령 완료 목록 최신순 정렬용, 수령 취소하면 비움)
 
     def __str__(self):
         return f"{self.visit_department} - {self.department}"
@@ -209,8 +210,11 @@ class PrescriptionDrug(models.Model):
     frequency_per_day = models.PositiveIntegerField(null=True, blank=True)  # 1일 복용횟수 (경구/소아약만)
     duration_days = models.PositiveIntegerField(null=True, blank=True)      # 복용일수 (경구/소아약만)
     quantity = models.PositiveIntegerField(default=0)   # 최종 수량, 재고차감 기준
+    dispensed_stock = models.ForeignKey(    # 조제할 때 재고를 뺀 배치 (수령 취소 시 여기로 되돌림, 수령 전·취소 후엔 비어 있음)
+        MissionStock, on_delete=models.PROTECT, null=True, blank=True, related_name="dispensed_items",
+    )
 
-        
+
     def save(self, *args, skip_recalculate=False, **kwargs):
         # 1회 복용량 × 1일 횟수 × 복용일수가 다 있으면 quantity 자동 계산
         # (외용약처럼 세 값이 없는 경우엔 quantity를 직접 입력한 값 그대로 사용)
