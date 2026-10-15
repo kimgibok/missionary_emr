@@ -1,0 +1,91 @@
+/* 약국팀 - reception.css(목록·패널), clinical.css(처방 카드) 다음에 불러온다 */
+
+/* 알레르기 경고 */
+.pharmacy-alert {
+    padding: 12px 14px;
+    margin-bottom: 16px;
+    background: rgba(178, 58, 46, 0.08);
+    border: 1px solid rgba(178, 58, 46, 0.35);
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-danger);
+}
+
+/* 목록 오른쪽 요약 태그 묶음 */
+.queue-item-tags {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 6px;
+}
+
+/* ---------- 조제할 처방약 한 줄 ---------- */
+.dispense-items {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.dispense-item {
+    padding: 12px 14px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+}
+
+.dispense-item.is-missing {
+    border-color: rgba(178, 58, 46, 0.35);
+}
+
+.dispense-item-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.dispense-item-name {
+    flex: 1;
+    min-width: 0;
+    font-weight: 600;
+    font-size: 15px;
+}
+
+.dispense-item-qty {
+    font-size: 17px;
+    color: var(--color-accent);
+}
+
+.dispense-item-dosage {
+    margin-top: 2px;
+    font-size: 13px;
+    color: var(--color-text-muted);
+}
+
+/* [수량 수정] - 글자는 작게, 터치 영역은 44px */
+.qty-edit-btn {
+    min-height: 44px;
+    padding: 0 4px 0 8px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--color-accent);
+}
+
+.dispense-batch.field-input {
+    margin: 10px 0 0;
+    font-size: 14px;
+}
+
+.dispense-item-missing {
+    margin-top: 8px;
+    font-size: 13px;
+    color: var(--color-danger);
+}
+
+/* 약 없는 처방 (기도·상담) */
+.dispense-no-drug {
+    margin-top: 4px;
+    font-size: 13px;
+    color: var(--color-text-muted);
+}

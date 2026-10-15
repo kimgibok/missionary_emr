@@ -4,19 +4,64 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ 약국팀 }} · 의료선교 EMR</title>
+    <title>약국팀 · 의료선교 EMR</title>
     <link rel="stylesheet" href="{% static_v 'css/base.css' %}">
     <link rel="stylesheet" href="{% static_v 'css/nav.css' %}">
     <link rel="stylesheet" href="{% static_v 'css/page.css' %}">
+    <link rel="stylesheet" href="{% static_v 'css/modal.css' %}">
+    <link rel="stylesheet" href="{% static_v 'css/reception.css' %}">
+    <link rel="stylesheet" href="{% static_v 'css/clinical.css' %}">
+    <link rel="stylesheet" href="{% static_v 'css/pharmacy.css' %}">
 </head>
 <body>
     {% include 'partials/nav.html' %}
     <main class="page-content">
-        <h1>{{ 약국팀 }}</h1>
-        <p style="color: var(--color-text-muted); margin-top: 8px;">준비중입니다.</p>
+        <h1>약국팀</h1>
+
+        <section class="card">
+            <div class="card-head">
+                <h2 class="card-title">조제 대기</h2>
+                <span class="count-badge" id="queue-count">0명</span>
+            </div>
+            <p class="section-hint">진료가 모두 끝난 오늘 환자가 등록번호 순으로 보입니다. 눌러서 조제하세요.</p>
+            <div id="queue-list" class="queue-list"></div>
+        </section>
+
+        <section class="intake-panel" id="dispense-panel" hidden>
+            <div class="intake-header">
+                <div class="intake-ticket">
+                    <span class="intake-ticket-no ticket-number" id="dp-reg-no"></span>
+                    <span class="intake-ticket-label">등록번호</span>
+                </div>
+                <div class="intake-patient">
+                    <div class="intake-patient-name" id="dp-name"></div>
+                    <div class="intake-patient-meta" id="dp-meta"></div>
+                </div>
+                <div class="intake-actions">
+                    <button class="btn-secondary btn-small" id="dp-close-btn" type="button">닫기</button>
+                </div>
+            </div>
+
+            <p class="pharmacy-alert" id="dp-allergy" hidden></p>
+
+            <h3 class="form-section-title">처방 <span class="section-head-sub">처방약마다 꺼낼 배치를 고르세요</span></h3>
+            <div id="dp-prescriptions" class="prescription-list"></div>
+
+            <p class="error-message" id="dp-error"></p>
+            <div class="intake-actions clinical-footer-actions">
+                <button class="btn-primary" type="button" id="dp-dispense-btn">수령 완료</button>
+            </div>
+        </section>
+        <div id="panel-dock"></div>
     </main>
 
+    {% include 'partials/modal.html' %}
+    <div class="toast" id="toast" role="status"></div>
+
     <script src="{% static_v 'js/api.js' %}"></script>
+    <script src="{% static_v 'js/common.js' %}"></script>
     <script src="{% static_v 'js/nav.js' %}"></script>
+    <script src="{% static_v 'js/modal.js' %}"></script>
+    <script src="{% static_v 'js/pharmacy.js' %}"></script>
 </body>
 </html>
