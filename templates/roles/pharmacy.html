@@ -18,7 +18,7 @@
     <main class="page-content">
         <h1>약국팀</h1>
 
-        <div class="tab-bar" role="tablist" aria-label="약국 화면">
+        <div class="tab-bar" id="main-tabs" role="tablist" aria-label="약국 화면">
             <button type="button" class="tab-button" role="tab" data-tab="dispense">조제</button>
             <button type="button" class="tab-button" role="tab" data-tab="stock">재고</button>
             <button type="button" class="tab-button" role="tab" data-tab="stats">통계</button>
@@ -119,16 +119,32 @@
 
         <!-- ===== 통계 탭 ===== -->
         <div class="tab-panel" id="tab-stats" role="tabpanel" hidden>
+            <div class="stats-controls">
+                <div class="tab-bar stats-period" id="stats-period" role="radiogroup" aria-label="통계 기간">
+                    <button type="button" class="tab-button" data-period="day">하루</button>
+                    <button type="button" class="tab-button" data-period="mission">미션 전체</button>
+                </div>
+                <input class="field-input stats-date" type="date" id="stats-date" aria-label="날짜">
+            </div>
+            <p class="stats-period-label" id="stats-period-label"></p>
+
+            <div class="stats-summary" id="stats-summary"></div>
+
+            <section class="card">
+                <div class="card-head">
+                    <h2 class="card-title">재고 소진 예상</h2>
+                    <span class="count-badge" id="runway-badge">미션 남은 0일</span>
+                </div>
+                <p class="section-hint" id="runway-hint">미션 전체 기준 · 남은 재고 ÷ 하루 평균 사용량(수령 처리가 있던 날 평균, 오늘 포함). 빨리 떨어지는 약이 위에 보입니다.</p>
+                <div id="runway-list"></div>
+            </section>
+
             <section class="card">
                 <div class="card-head">
                     <h2 class="card-title">약품 사용량</h2>
                     <span class="count-badge" id="stats-count">0종</span>
                 </div>
-                <p class="section-hint">고른 날짜에 수령 처리된 약의 합계입니다. (수령 취소한 건은 빠집니다)</p>
-                <div class="stats-date-row">
-                    <label class="field-label" for="stats-date">날짜</label>
-                    <input class="field-input" type="date" id="stats-date">
-                </div>
+                <p class="section-hint">고른 기간에 수령 처리된 약의 합계입니다. (수령 취소한 건은 빠집니다)</p>
                 <div id="stats-list"></div>
             </section>
         </div>

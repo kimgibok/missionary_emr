@@ -434,37 +434,101 @@ class MissionStockListView(generics.ListAPIView):
         return qs
 
 
-class DailyDrugStatsView(APIView):
-    """약국팀 일별 약품 사용 통계 - 실제로 수령 처리된 약만 합산 (?date=YYYY-MM-DD, 기본 오늘)"""
+class PharmacyStatsView(APIView):
+    """
+    약국 통계 - 수령 처리된 약만 센다.
+      ?period=day&date=YYYY-MM-DD (기본 오늘) / ?period=mission (미션 시작 ~ 오늘)
+    summary: 고른 기간의 수령 환자 수·처방 건수·사용한 약 종수·환자당 평균 처방약 수
+    drugs:   고른 기간의 약별 사용량 (많이 쓴 순)
+    runway:  재고 소진 예상 - 기간과 상관없이 미션 기준.
+             하루 평균 = 미션 사용량 ÷ 진료한 날 수(수령 처리가 있던 날, 오늘 포함), 예상 일수 = 남은 재고 ÷ 하루 평균.
+             예상 일수가 미션 남은 일수(오늘 포함)보다 적으면 runs_out = True (미션 중 소진).
+    """
     permission_classes = [IsPharmacyTeam]
 
     def get(self, request):
         mission = get_current_mission(request.user)
         if mission is None:
-            return Response([])
+            raise ValidationError({'detail': '진행중인 미션이 없습니다.'})
 
-        date_param = request.query_params.get('date')
-        try:
-            target_date = parse_date(date_param) if date_param else timezone.localdate()
-        except ValueError:  # 형식은 맞지만 없는 날짜 (예: 2026-13-01)
-            target_date = None
-        if target_date is None:
-            raise ValidationError({'detail': '날짜 형식이 올바르지 않습니다. (예: 2026-10-15)'})
+        today = timezone.localdate()
+        period = request.query_params.get('period', 'day')
+        if period not in ('day', 'mission'):
+            raise ValidationError({'detail': 'period는 day 또는 mission이어야 합니다.'})
 
-        stats = (
-            PrescriptionDrug.objects.filter(
-                prescription__visit_department__visit__mission=mission,
-                prescription__visit_department__visit__visit_date=target_date,
-                prescription__is_dispensed=True,
-            )
-            .values('drug_id', 'drug__name')
+        mission_items = PrescriptionDrug.objects.filter(
+            prescription__visit_department__visit__mission=mission, prescription__is_dispensed=True,
+        )
+        mission_rx = Prescription.objects.filter(visit_department__visit__mission=mission, is_dispensed=True)
+
+        if period == 'day':
+            date_param = request.query_params.get('date')
+            try:
+                target_date = parse_date(date_param) if date_param else today
+            except ValueError:  # 형식은 맞지만 없는 날짜 (예: 2026-13-01)
+                target_date = None
+            if target_date is None:
+                raise ValidationError({'detail': '날짜 형식이 올바르지 않습니다. (예: 2026-10-15)'})
+            period_items = mission_items.filter(prescription__visit_department__visit__visit_date=target_date)
+            period_rx = mission_rx.filter(visit_department__visit__visit_date=target_date)
+            period_info = {'period': 'day', 'date': target_date}
+        else:
+            period_items, period_rx = mission_items, mission_rx
+            period_info = {'period': 'mission', 'start_date': mission.start_date, 'end_date': today}
+
+        # ----- 고른 기간: 요약 + 약별 사용량 -----
+        drugs = list(
+            period_items.values('drug_id', 'drug__name')
             .annotate(total_quantity=Sum('quantity'))
             .order_by('-total_quantity', 'drug__name')
         )
-        return Response([
-            {'drug_id': s['drug_id'], 'drug_name': s['drug__name'], 'total_quantity': s['total_quantity']}
-            for s in stats
-        ])
+        patients = period_rx.values('visit_department__visit_id').distinct().count()
+        item_count = period_items.count()
+        summary = {
+            'patients': patients,
+            'prescriptions': period_rx.count(),
+            'drug_kinds': len(drugs),
+            'avg_items_per_patient': round(item_count / patients, 1) if patients else 0,
+        }
+
+        # ----- 미션 기준: 재고 소진 예상 -----
+        days_worked = mission_rx.values('visit_department__visit__visit_date').distinct().count()
+        mission_days_left = max((mission.end_date - today).days + 1, 0)
+        used = mission_items.values('drug_id', 'drug__name').annotate(total=Sum('quantity'))
+        remaining = dict(
+            MissionStock.objects.filter(mission=mission, is_settled=False)
+            .values('drugbatch__drug_id')
+            .annotate(total=Sum('remaining_qty'))
+            .values_list('drugbatch__drug_id', 'total')
+        )
+        runway = []
+        for u in used:
+            if not u['total'] or not days_worked:
+                continue
+            daily_avg = u['total'] / days_worked
+            left = remaining.get(u['drug_id'], 0)
+            days_left = left / daily_avg
+            runway.append({
+                'drug_id': u['drug_id'],
+                'drug_name': u['drug__name'],
+                'remaining_qty': left,
+                'daily_avg': round(daily_avg, 1),
+                'days_left': round(days_left, 1),
+                'runs_out': days_left < mission_days_left,
+            })
+        runway.sort(key=lambda r: (r['days_left'], r['drug_name']))
+
+        return Response({
+            **period_info,
+            'summary': summary,
+            'drugs': [
+                {'drug_id': d['drug_id'], 'drug_name': d['drug__name'], 'total_quantity': d['total_quantity']}
+                for d in drugs
+            ],
+            'days_worked': days_worked,
+            'mission_days_left': mission_days_left,
+            'runway': runway,
+        })
 
 
 class PharmacyQueueView(generics.ListAPIView):

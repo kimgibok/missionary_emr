@@ -147,6 +147,7 @@ async function refreshAll(force = false) {
         // 조제 목록은 탭과 상관없이 갱신한다 (자동 출력이 이 목록을 보고 인쇄하므로)
         const loads = [loadQueue(), loadDone()];
         if (activeTab === 'stock') loads.push(loadStock());
+        if (activeTab === 'stats') loads.push(loadStats());
         await Promise.all(loads);
         if (isAutoPrintOn()) await autoPrintNew();
     } catch (err) {
@@ -862,7 +863,7 @@ function todayStr() {
 function showTab(tab) {
     activeTab = TABS.includes(tab) ? tab : 'dispense';
     localStorage.setItem(TAB_KEY, activeTab);
-    document.querySelectorAll('.tab-button').forEach((btn) => {
+    byId('main-tabs').querySelectorAll('.tab-button').forEach((btn) => {
         const on = btn.dataset.tab === activeTab;
         btn.classList.toggle('active', on);
         btn.setAttribute('aria-selected', String(on));
@@ -873,7 +874,7 @@ function showTab(tab) {
     if (activeTab === 'stats') loadStats();
 }
 
-document.querySelector('.tab-bar').addEventListener('click', (e) => {
+byId('main-tabs').addEventListener('click', (e) => {
     const btn = e.target.closest('.tab-button');
     if (btn) showTab(btn.dataset.tab);
 });
@@ -970,29 +971,86 @@ byId('stock-refresh-btn').addEventListener('click', () => {
 
 
 // =====================================================
-// 11. 통계 탭 - 고른 날짜에 수령 처리된 약의 합계
+// 11. 통계 탭 - 기간(하루 / 미션 전체) 요약·약별 사용량 + 미션 기준 재고 소진 예상
 // =====================================================
 
+let statsPeriod = 'day';        // 'day' | 'mission'
+
+function statTileHtml(label, value, unit) {
+    return `
+        <div class="stat-tile">
+            <span class="stat-tile-label">${label}</span>
+            <span class="stat-tile-value">${value}<small>${unit}</small></span>
+        </div>`;
+}
+
+function runwayRowHtml(r) {
+    const tag = r.runs_out ? '<span class="doctor-tag unassigned">미션 중 소진</span>' : '';
+    return `
+        <div class="runway-row${r.runs_out ? ' runs-out' : ''}">
+            <span class="runway-name">${escapeHtml(r.drug_name)}</span>
+            ${tag}
+            <span class="runway-detail">남은 ${r.remaining_qty} · 하루 평균 ${r.daily_avg}</span>
+            <span class="runway-days">${r.remaining_qty === 0 ? '소진' : `약 ${r.days_left}일`}</span>
+        </div>`;
+}
+
+function renderStats(d) {
+    byId('stats-period-label').textContent = d.period === 'day'
+        ? `${d.date} 하루`
+        : `미션 전체 · ${d.start_date} ~ ${d.end_date} (진료한 날 ${d.days_worked}일)`;
+
+    const s = d.summary;
+    byId('stats-summary').innerHTML = [
+        statTileHtml('수령 환자', s.patients, '명'),
+        statTileHtml('처방 건수', s.prescriptions, '건'),
+        statTileHtml('사용한 약', s.drug_kinds, '종'),
+        statTileHtml('환자당 평균', s.avg_items_per_patient, '종'),
+    ].join('');
+
+    const outCount = d.runway.filter((r) => r.runs_out).length;
+    byId('runway-badge').textContent = `미션 남은 ${d.mission_days_left}일`;
+    byId('runway-list').innerHTML = d.runway.length === 0
+        ? '<p class="empty-text">아직 수령 처리된 약이 없어 예상할 수 없습니다.</p>'
+        : (outCount > 0 ? `<p class="empty-text is-error">미션이 끝나기 전에 떨어질 약이 ${outCount}종 있습니다.</p>` : '')
+          + d.runway.map(runwayRowHtml).join('');
+
+    byId('stats-count').textContent = `${d.drugs.length}종`;
+    byId('stats-list').innerHTML = d.drugs.length === 0
+        ? '<p class="empty-text">이 기간에 수령 처리된 약이 없습니다.</p>'
+        : `<table class="stats-table">
+               <thead><tr><th>약</th><th class="stats-qty">사용량</th></tr></thead>
+               <tbody>${d.drugs.map((r) => `
+                   <tr><td>${escapeHtml(r.drug_name)}</td><td class="stats-qty">${r.total_quantity}</td></tr>`).join('')}
+               </tbody>
+           </table>`;
+}
+
 async function loadStats() {
-    const date = byId('stats-date').value || todayStr();
-    const el = byId('stats-list');
+    byId('stats-period').querySelectorAll('.tab-button').forEach((btn) => {
+        btn.classList.toggle('active', btn.dataset.period === statsPeriod);
+    });
+    byId('stats-date').hidden = statsPeriod !== 'day';
+
+    const query = statsPeriod === 'day'
+        ? `period=day&date=${encodeURIComponent(byId('stats-date').value || todayStr())}`
+        : 'period=mission';
     try {
-        const rows = await apiFetch(`/prescription-drugs/daily-stats/?date=${encodeURIComponent(date)}`);
-        byId('stats-count').textContent = `${rows.length}종`;
-        el.innerHTML = rows.length === 0
-            ? '<p class="empty-text">이 날 수령 처리된 약이 없습니다.</p>'
-            : `<table class="stats-table">
-                   <thead><tr><th>약</th><th class="stats-qty">사용량</th></tr></thead>
-                   <tbody>${rows.map((r) => `
-                       <tr><td>${escapeHtml(r.drug_name)}</td><td class="stats-qty">${r.total_quantity}</td></tr>`).join('')}
-                   </tbody>
-               </table>`;
+        renderStats(await apiFetch(`/prescription-drugs/stats/?${query}`));
     } catch (err) {
+        byId('stats-summary').innerHTML = '';
+        byId('runway-list').innerHTML = '';
         byId('stats-count').textContent = '0종';
-        el.innerHTML = `<p class="empty-text is-error">${escapeHtml(err.message)}</p>`;
+        byId('stats-list').innerHTML = `<p class="empty-text is-error">${escapeHtml(err.message)}</p>`;
     }
 }
 
+byId('stats-period').addEventListener('click', (e) => {
+    const btn = e.target.closest('.tab-button');
+    if (!btn) return;
+    statsPeriod = btn.dataset.period;
+    loadStats();
+});
 byId('stats-date').addEventListener('change', loadStats);
 
 
