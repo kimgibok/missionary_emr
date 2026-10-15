@@ -13,6 +13,12 @@
 const REFRESH_MS = 10000;
 const ALARM_REPEAT_MS = 10000;               // 경고창을 확인할 때까지 소리를 다시 울리는 간격
 const AUTOPRINT_KEY = 'pharmacy_autoprint';  // 이 기기에서 자동 출력을 켰는지 (localStorage)
+const PAPER_KEY = 'pharmacy_paper';          // 이 기기의 조제지 용지 'receipt' | 'a4' (localStorage)
+// 용지별 @page. 영수증은 크기를 정하지 않아(auto) 프린터 드라이버의 기본 용지(80mm·58mm 감열지)를 따른다.
+const PAGE_STYLES = {
+    receipt: '@page { size: auto; margin: 0; }',
+    a4: '@page { size: A4; margin: 14mm; }',
+};
 const dispensePanel = byId('dispense-panel');
 
 // ----- 상태 -----
@@ -490,8 +496,21 @@ function slipHtml(v) {
         </article>`;
 }
 
+// 고른 용지에 맞춰 조제지 모양(영수증/A4)과 @page를 바꾼다
+function applyPaper() {
+    const paper = byId('paper-select').value;
+    byId('print-area').classList.toggle('is-receipt', paper === 'receipt');
+    byId('page-style').textContent = PAGE_STYLES[paper];
+}
+
+byId('paper-select').addEventListener('change', () => {
+    localStorage.setItem(PAPER_KEY, byId('paper-select').value);
+    applyPaper();
+});
+
 // 여러 명이면 한 사람에 한 장씩 이어서 인쇄. window.print()는 인쇄가 끝날 때까지 멈춘다.
 function printSlips(visits) {
+    applyPaper();
     byId('print-area').innerHTML = visits.map(slipHtml).join('');
     window.print();
 }
@@ -548,9 +567,8 @@ byId('dp-print-btn').addEventListener('click', printCurrent);
 // 소리 허락받기 - 클릭 같은 사용자 동작 안에서 불러야 한다
 function ensureAudio() {
     if (!audioCtx) {
-        const Ctx = window.AudioContext || window.webkitAudioContext;
-        if (!Ctx) return null;
-        audioCtx = new Ctx();
+        if (!window.AudioContext) return null;
+        audioCtx = new AudioContext();
         audioCtx.onstatechange = updateAutoPrintStatus;
     }
     if (audioCtx.state === 'suspended') audioCtx.resume();
@@ -654,6 +672,8 @@ document.addEventListener('pointerdown', () => {
 // =====================================================
 
 byId('autoprint-toggle').checked = localStorage.getItem(AUTOPRINT_KEY) === '1';
+byId('paper-select').value = localStorage.getItem(PAPER_KEY) === 'a4' ? 'a4' : 'receipt';
+applyPaper();
 updateAutoPrintStatus();
 
 document.addEventListener('visibilitychange', () => {

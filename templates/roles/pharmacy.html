@@ -22,6 +22,10 @@
             <div class="card-head">
                 <h2 class="card-title">조제 대기</h2>
                 <div class="card-head-side">
+                    <select class="field-input paper-select" id="paper-select" aria-label="조제지 용지">
+                        <option value="receipt">영수증</option>
+                        <option value="a4">A4</option>
+                    </select>
                     <label class="toggle autoprint-toggle"><input type="checkbox" id="autoprint-toggle"><span>자동 출력</span></label>
                     <span class="count-badge" id="queue-count">0명</span>
                 </div>
@@ -60,8 +64,9 @@
         <div id="panel-dock"></div>
     </main>
 
-    <!-- 인쇄할 때만 보이는 조제지 (pharmacy.css의 @media print) -->
+    <!-- 인쇄할 때만 보이는 조제지 (pharmacy.css의 @media print). 용지 크기(@page)는 pharmacy.js가 #page-style에 넣는다 -->
     <div class="print-area" id="print-area"></div>
+    <style id="page-style"></style>
 
     {% include 'partials/modal.html' %}
     <div class="toast" id="toast" role="status"></div>
