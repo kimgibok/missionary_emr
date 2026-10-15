@@ -85,6 +85,12 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': BASE_DIR / 'db' / 'emr.db',
+        'OPTIONS': {
+            # SQLite는 select_for_update()를 무시한다. IMMEDIATE면 transaction.atomic()이 시작할 때 쓰기 잠금을 잡아서
+            # 여러 기기의 동시 요청(등록번호 발급 등)이 'database is locked' 오류 없이 차례로 처리된다.
+            'transaction_mode': 'IMMEDIATE',
+            'timeout': 20,  # 다른 요청이 쓰기 잠금을 잡고 있으면 최대 20초까지 기다린다 (기본 5초)
+        },
     }
 }
 
