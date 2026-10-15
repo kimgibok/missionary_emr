@@ -7,6 +7,8 @@
 //   5. 수령 처리
 //   6. 조제지 출력 (자동 출력 PC에서 새 환자를 자동 인쇄 + 패널의 [조제지 출력])
 //   7. 재고 문제 경고창 · 소리
+//   8. 오늘 수령 완료 목록 · 수령 취소
+// 목록을 innerHTML로 다시 그리기 전에 패널을 #panel-dock으로 옮겨 둔다 (안 그러면 패널이 DOM에서 떨어져 나간다)
 // escapeHtml, patientMeta, doctorLabel, showToast, byId는 common.js
 // =====================================================
 
@@ -20,10 +22,14 @@ const PAGE_STYLES = {
     a4: '@page { size: A4; margin: 14mm; }',
 };
 const dispensePanel = byId('dispense-panel');
+const donePanel = byId('done-panel');
 
 // ----- 상태 -----
 let queueData = null;           // 조제 대기 목록 - 서버 응답 그대로
 let queueSignature = '';        // 목록이 바뀌었는지 비교용
+let doneData = null;            // 오늘 수령 완료 목록 - 서버 응답 그대로
+let doneSignature = '';
+let currentDone = null;         // 지금 열려 있는 수령 완료 환자 (목록 항목 그대로)
 let renderPending = false;      // 배치를 고르는 중이라 목록 갱신을 미뤄둔 상태
 let currentVisit = null;        // 지금 열려 있는 환자의 조제 정보 (dispense-options 응답)
 let batchChoice = new Map();    // 처방약 id → 고른 배치(mission_stock) id
@@ -66,6 +72,7 @@ function queueItemHtml(v) {
 }
 
 function renderQueue() {
+    byId('panel-dock').appendChild(dispensePanel);
     byId('queue-count').textContent = `${queueData.count}명`;
     byId('queue-list').innerHTML = queueData.results.length === 0
         ? '<p class="empty-text">조제를 기다리는 환자가 없습니다.</p>'
@@ -81,7 +88,7 @@ function placePanel() {
         dispensePanel.hidden = true;
         return;
     }
-    const item = document.querySelector(`.queue-item[data-visit-id="${currentVisit.id}"]`);
+    const item = byId('queue-list').querySelector(`.queue-item[data-visit-id="${currentVisit.id}"]`);
     if (!item) {
         const name = currentVisit.patient.name_kr;
         closePanel();
@@ -129,7 +136,7 @@ async function refreshAll(force = false) {
     // 자동 출력 PC는 다른 창에 가려져 있어도 계속 확인한다
     if (document.hidden && !force && !isAutoPrintOn()) return;
     try {
-        await loadQueue();
+        await Promise.all([loadQueue(), loadDone()]);
         if (isAutoPrintOn()) await autoPrintNew();
     } catch (err) {
         console.error(err);
@@ -161,6 +168,7 @@ async function loadVisitOptions(id) {
 
 async function openVisit(id) {
     try {
+        if (currentDone) closeDonePanel();   // 패널은 한 번에 하나만
         batchChoice = new Map();
         await loadVisitOptions(id);
         renderQueue();
@@ -177,9 +185,9 @@ function closePanel() {
     if (queueData) renderQueue();
 }
 
-function scrollToSelected() {
+function scrollToSelected(panel = dispensePanel) {
     const item = document.querySelector('.queue-item.selected');
-    (item || dispensePanel).scrollIntoView({ behavior: 'smooth', block: 'start' });
+    (item || panel).scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 byId('dp-close-btn').addEventListener('click', closePanel);
@@ -665,6 +673,167 @@ byId('autoprint-toggle').addEventListener('change', () => {
 document.addEventListener('pointerdown', () => {
     if (isAutoPrintOn() && !soundReady()) ensureAudio();
 });
+
+
+// =====================================================
+// 8. 오늘 수령 완료 목록 · 수령 취소
+//    수령 취소 = 그 환자의 수령된 처방 전부를 조제 대기로 되돌리고, 조제할 때 뺀 배치에 재고를 돌려준다.
+//    조제지는 이미 찍었으므로 다시 출력하지 않는다(필요하면 조제 패널의 [조제지 출력]).
+// =====================================================
+
+// 가장 최근 수령 시각 "14:35 수령"
+function dispensedTimeLabel(v) {
+    const times = v.prescriptions.map((p) => p.dispensed_at).filter(Boolean).sort();
+    if (times.length === 0) return '수령';
+    const d = new Date(times[times.length - 1]);
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')} 수령`;
+}
+
+function doneItemHtml(v) {
+    const selected = currentDone && currentDone.id === v.id ? ' selected' : '';
+    return `
+        <button type="button" class="queue-item${selected}" data-done-id="${v.id}">
+            <span class="queue-item-no ticket-number">${v.reg_no}</span>
+            <span class="queue-item-main">
+                <span class="queue-item-name">${escapeHtml(v.patient.name_kr)}</span>
+                <span class="queue-item-meta">${escapeHtml(patientMeta(v))}</span>
+            </span>
+            <span class="doctor-tag">${dispensedTimeLabel(v)}</span>
+        </button>`;
+}
+
+function renderDone() {
+    byId('panel-dock').appendChild(donePanel);
+    byId('done-count').textContent = `${doneData.count}명`;
+    byId('done-list').innerHTML = doneData.results.length === 0
+        ? '<p class="empty-text">아직 수령 처리한 환자가 없습니다.</p>'
+        : doneData.results.map(doneItemHtml).join('');
+    placeDonePanel();
+}
+
+// 열린 환자 아래에 패널을 붙이고 최신 내용으로 다시 채운다. 목록에서 빠졌으면(다른 기기에서 수령 취소) 닫는다.
+function placeDonePanel() {
+    if (!currentDone) {
+        donePanel.hidden = true;
+        return;
+    }
+    const fresh = doneData.results.find((v) => v.id === currentDone.id);
+    const item = byId('done-list').querySelector(`.queue-item[data-done-id="${currentDone.id}"]`);
+    if (!fresh || !item) {
+        currentDone = null;
+        donePanel.hidden = true;
+        return;
+    }
+    currentDone = fresh;
+    renderDonePanel();
+    item.after(donePanel);
+    donePanel.hidden = false;
+}
+
+async function loadDone() {
+    const data = await apiFetch('/visits/pharmacy-done/?page_size=200');   // 서버가 수령 시각 최신순으로 정렬
+    const signature = JSON.stringify(data);
+    if (signature === doneSignature) return;
+    doneSignature = signature;
+    doneData = data;
+    renderDone();
+}
+
+function doneDrugHtml(i) {
+    const dosage = dosageText(i);
+    const batch = i.dispensed_batch
+        ? `배치: 유통기한 ${i.dispensed_batch.expiry_date} · ${i.dispensed_batch.source}`
+        : '배치 기록 없음';
+    return `
+        <div class="dispense-item">
+            <div class="dispense-item-head">
+                <span class="dispense-item-name">${escapeHtml(i.drug_name)}</span>
+                <span class="dispense-item-qty ticket-number">× ${i.quantity}</span>
+            </div>
+            ${dosage ? `<div class="dispense-item-dosage">${escapeHtml(dosage)}</div>` : ''}
+            <div class="dispense-item-dosage">${escapeHtml(batch)}</div>
+        </div>`;
+}
+
+function renderDonePanel() {
+    const v = currentDone;
+    byId('dn-reg-no').textContent = v.reg_no;
+    byId('dn-name').textContent = v.patient.name_kr;
+    byId('dn-meta').textContent = patientMeta(v) + (v.weight ? ` · ${v.weight}kg` : '');
+    byId('dn-prescriptions').innerHTML = v.prescriptions.map((p) => `
+        <div class="prescription-card">
+            <div class="prescription-card-head">
+                <span class="prescription-card-dept">${doctorLabel(p.doctor_name, p.department_name)}</span>
+            </div>
+            ${p.clinical_note ? `<div class="prescription-card-note">${escapeHtml(p.clinical_note)}</div>` : ''}
+            ${p.items.length === 0
+                ? '<p class="dispense-no-drug">처방약 없음</p>'
+                : `<div class="dispense-items">${p.items.map(doneDrugHtml).join('')}</div>`}
+        </div>`).join('');
+}
+
+function openDone(id) {
+    if (currentVisit) closePanel();     // 패널은 한 번에 하나만
+    currentDone = doneData.results.find((v) => v.id === id) || null;
+    renderDone();
+    scrollToSelected(donePanel);
+}
+
+function closeDonePanel() {
+    currentDone = null;
+    if (doneData) renderDone();
+}
+
+byId('done-list').addEventListener('click', (e) => {
+    const item = e.target.closest('.queue-item');
+    if (!item) return;
+    const id = Number(item.dataset.doneId);
+    if (currentDone && currentDone.id === id) {
+        closeDonePanel();
+    } else {
+        openDone(id);
+    }
+});
+
+byId('dn-close-btn').addEventListener('click', closeDonePanel);
+
+function requestUndispense() {
+    if (!currentDone || isBusy) return;
+    const drugCount = allItems(currentDone).length;
+    const stockNote = drugCount === 0
+        ? '처방약이 없어 재고는 바뀌지 않습니다.'
+        : `처방약 ${drugCount}종의 재고가 조제한 배치로 돌아갑니다.`;
+    openModal({
+        title: '수령 취소',
+        bodyHtml: `<p class="modal-note">${escapeHtml(currentDone.patient.name_kr)} 환자의 수령을 취소합니다.
+            ${stockNote} 환자는 조제 대기로 돌아가고, 조제지는 다시 출력되지 않습니다.</p>`,
+        confirmLabel: '수령 취소',
+        onConfirm: () => { undispense(); },
+    });
+}
+
+async function undispense() {
+    if (!currentDone || isBusy) return;
+    const btn = byId('dn-undispense-btn');
+    const { id } = currentDone;
+    const name = currentDone.patient.name_kr;
+
+    isBusy = true;
+    btn.disabled = true;
+    try {
+        await apiFetch(`/visits/${id}/undispense/`, { method: 'POST' });
+        showToast(`${name} 환자 수령을 취소했습니다. 조제 대기로 돌아갑니다.`);
+        closeDonePanel();
+    } catch (err) {
+        showToast(err.message, true);
+    } finally {
+        isBusy = false;
+        btn.disabled = false;
+    }
+    refreshAll(true);
+}
+
+byId('dn-undispense-btn').addEventListener('click', requestUndispense);
 
 
 // =====================================================

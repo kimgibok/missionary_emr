@@ -35,6 +35,15 @@
             <div id="queue-list" class="queue-list"></div>
         </section>
 
+        <section class="card">
+            <div class="card-head">
+                <h2 class="card-title">오늘 수령 완료</h2>
+                <span class="count-badge" id="done-count">0명</span>
+            </div>
+            <p class="section-hint">최근에 수령한 환자가 위에 보입니다. 잘못 처리했으면 눌러서 [수령 취소]할 수 있어요.</p>
+            <div id="done-list" class="queue-list"></div>
+        </section>
+
         <section class="intake-panel" id="dispense-panel" hidden>
             <div class="intake-header">
                 <div class="intake-ticket">
@@ -59,6 +68,29 @@
             <div class="intake-actions clinical-footer-actions">
                 <button class="btn-secondary" type="button" id="dp-print-btn">조제지 출력</button>
                 <button class="btn-primary" type="button" id="dp-dispense-btn">수령 완료</button>
+            </div>
+        </section>
+
+        <section class="intake-panel" id="done-panel" hidden>
+            <div class="intake-header">
+                <div class="intake-ticket">
+                    <span class="intake-ticket-no ticket-number" id="dn-reg-no"></span>
+                    <span class="intake-ticket-label">등록번호</span>
+                </div>
+                <div class="intake-patient">
+                    <div class="intake-patient-name" id="dn-name"></div>
+                    <div class="intake-patient-meta" id="dn-meta"></div>
+                </div>
+                <div class="intake-actions">
+                    <button class="btn-secondary btn-small" id="dn-close-btn" type="button">닫기</button>
+                </div>
+            </div>
+
+            <h3 class="form-section-title">수령한 처방 <span class="section-head-sub">약마다 꺼낸 배치</span></h3>
+            <div id="dn-prescriptions" class="prescription-list"></div>
+
+            <div class="intake-actions clinical-footer-actions">
+                <button class="btn-secondary" type="button" id="dn-undispense-btn">수령 취소</button>
             </div>
         </section>
         <div id="panel-dock"></div>

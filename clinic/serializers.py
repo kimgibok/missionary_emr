@@ -283,13 +283,22 @@ class PharmacyDrugItemSerializer(serializers.ModelSerializer):
     """약국팀 처방약 한 줄 - 환자에게 복용법을 설명할 수 있게 복용스케줄·용법 포함"""
     drug_name = serializers.CharField(source='drug.name', read_only=True)
     usage = serializers.CharField(source='drug.usage', read_only=True)
+    dispensed_batch = serializers.SerializerMethodField()
 
     class Meta:
         model = PrescriptionDrug
         fields = [
             'id', 'drug', 'drug_name', 'usage',
-            'dose_per_intake', 'frequency_per_day', 'duration_days', 'quantity', 'dispensed_stock',
+            'dose_per_intake', 'frequency_per_day', 'duration_days', 'quantity',
+            'dispensed_stock', 'dispensed_batch',
         ]
+
+    def get_dispensed_batch(self, obj):
+        """수령 완료 목록에 보일 '조제한 배치' - 유통기한·출처 (수령 전이면 None)"""
+        stock = obj.dispensed_stock
+        if stock is None:
+            return None
+        return {'expiry_date': stock.drugbatch.expiry_date, 'source': stock.drugbatch.get_source_display()}
 
 
 class PharmacyPrescriptionSerializer(serializers.ModelSerializer):
@@ -358,7 +367,7 @@ class PharmacyVisitSerializer(serializers.ModelSerializer):
                 visit_department__visit=obj, is_dispensed=self.context.get('dispensed', False)
             )
             .select_related('department', 'visit_department__user')
-            .prefetch_related('items__drug')
+            .prefetch_related('items__drug', 'items__dispensed_stock__drugbatch')
             .order_by('id')
         )
         return PharmacyPrescriptionSerializer(qs, many=True).data
