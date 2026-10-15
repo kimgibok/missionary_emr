@@ -10,6 +10,15 @@
     margin-bottom: 0;
 }
 
+/* 카드 머리 오른쪽에 여러 개(배지·버튼·스위치)를 둘 때 */
+.card-head-side {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
 .count-badge {
     padding: 4px 12px;
     background: var(--color-bg);

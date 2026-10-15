@@ -148,3 +148,107 @@
     color: var(--color-danger);
     font-weight: 700;
 }
+
+/* ---------- 목록 한 줄 (약품·분류, 이후 창고·미션 재고도 같이 쓴다) ---------- */
+
+.admin-filters {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 14px;
+}
+
+.admin-filters .field-input {
+    margin-bottom: 0;
+}
+
+@media (max-width: 640px) {
+    .admin-filters {
+        grid-template-columns: 1fr 1fr;
+    }
+    .admin-filters input {
+        grid-column: 1 / -1;
+    }
+}
+
+.admin-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.admin-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px 10px;
+    padding: 10px 12px;
+    background: var(--color-bg);
+    border-radius: 12px;
+}
+
+.admin-row-main {
+    flex: 1;
+    min-width: 160px;
+}
+
+.admin-row-title {
+    display: block;
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.admin-row-sub {
+    display: block;
+    font-size: 13px;
+    color: var(--color-text-muted);
+}
+
+.admin-row-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.admin-row-actions {
+    display: flex;
+    gap: 4px;
+}
+
+/* [삭제] - 글자는 작게, 터치 영역은 44px */
+.row-delete {
+    min-height: 44px;
+    padding: 0 10px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--color-danger);
+}
+
+/* ---------- 분류 두 칸 ---------- */
+.category-columns {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+}
+
+@media (max-width: 640px) {
+    .category-columns {
+        grid-template-columns: 1fr;
+    }
+}
+
+.category-column-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.category-column-head .form-section-title {
+    margin: 0;
+}
+
+/* 모달 안의 토글 한 줄 */
+.modal-body .toggle-row {
+    margin: 4px 0 8px;
+}

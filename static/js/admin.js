@@ -3,6 +3,7 @@
 //   1. 미션 선택 (진행중 미션 먼저) - 통계·미션 재고 탭에서만 보인다
 //   2. 탭 (통계 | 미션 재고 | 창고 재고 | 약품 | 설정)
 //   3. 통계 탭 - 요약, 진료과별 환자 수, 약 분류별·진료과별 사용량, 다음 미션 준비표, 엑셀 다운로드
+//   4. 약품 탭 - 약품·분류·세부 분류 추가·수정·삭제, 검색
 // escapeHtml, showToast, byId는 common.js
 // =====================================================
 
@@ -18,6 +19,7 @@ const TAB_LOADERS = {};
 let missions = [];              // 미션 목록 (서버 응답 그대로)
 let currentMission = null;      // 고른 미션
 let activeTab = 'stats';
+let isBusy = false;             // 저장 요청 중이면 중복 클릭을 막음
 
 
 // =====================================================
@@ -278,6 +280,303 @@ byId('stats-export-btn').addEventListener('click', async () => {
         btn.textContent = '엑셀 다운로드';
     }
 });
+
+
+// =====================================================
+// 공용 - 삭제 확인 모달
+// =====================================================
+
+// "OO을(를) 삭제합니다" 확인 후 DELETE. 쓰이고 있어서 못 지우면 서버 메시지를 토스트로.
+function confirmDelete({ title, name, path, onDone }) {
+    openModal({
+        title,
+        bodyHtml: `<p class="modal-note">${escapeHtml(name)}을(를) 삭제합니다. 되돌릴 수 없어요.</p>`,
+        confirmLabel: '삭제',
+        onConfirm: () => {
+            (async () => {
+                try {
+                    await apiFetch(path, { method: 'DELETE' });
+                    showToast(`${name}을(를) 삭제했습니다.`);
+                    onDone();
+                } catch (err) {
+                    showToast(err.message, true);
+                }
+            })();
+        },
+    });
+}
+
+
+// =====================================================
+// 4. 약품 탭 - 약품 / 분류(cat1) / 세부 분류(cat2)
+// =====================================================
+
+let cat1List = [];              // 분류 [{id, name, uses_dosage_schedule}]
+let cat2List = [];              // 세부 분류 [{id, name}]
+let drugList = [];              // 지금 검색 조건의 약품
+let drugRequestSeq = 0;         // 검색어를 빨리 바꿀 때 늦게 온 예전 응답을 버리기 위한 번호
+let drugSearchTimer = null;
+
+function optionsHtml(list, selectedId, emptyLabel) {
+    const empty = emptyLabel === null ? '' : `<option value="">${emptyLabel}</option>`;
+    return empty + list.map((x) =>
+        `<option value="${x.id}"${String(x.id) === String(selectedId) ? ' selected' : ''}>${escapeHtml(x.name)}</option>`,
+    ).join('');
+}
+
+// ----- 분류 -----
+
+function categoryRowHtml(c, level) {
+    const sub = level === 'cat1'
+        ? (c.uses_dosage_schedule ? '처방: 복용스케줄(1회량·횟수·일수)' : '처방: 수량 직접 입력')
+        : '';
+    return `
+        <div class="admin-row" data-level="${level}" data-id="${c.id}">
+            <span class="admin-row-main">
+                <span class="admin-row-title">${escapeHtml(c.name)}</span>
+                ${sub ? `<span class="admin-row-sub">${sub}</span>` : ''}
+            </span>
+            <span class="admin-row-actions">
+                <button type="button" class="btn-secondary btn-small" data-action="edit">수정</button>
+                <button type="button" class="row-delete" data-action="delete">삭제</button>
+            </span>
+        </div>`;
+}
+
+function renderCategories() {
+    byId('cat1-list').innerHTML = cat1List.length === 0
+        ? emptyRowHtml('분류가 없습니다.')
+        : cat1List.map((c) => categoryRowHtml(c, 'cat1')).join('');
+    byId('cat2-list').innerHTML = cat2List.length === 0
+        ? emptyRowHtml('세부 분류가 없습니다.')
+        : cat2List.map((c) => categoryRowHtml(c, 'cat2')).join('');
+
+    // 약품 필터 선택지 (고른 값은 유지)
+    byId('drug-filter-cat1').innerHTML = optionsHtml(cat1List, byId('drug-filter-cat1').value, '분류 전체');
+    byId('drug-filter-cat2').innerHTML = optionsHtml(cat2List, byId('drug-filter-cat2').value, '세부 분류 전체');
+}
+
+async function loadCategories() {
+    const [c1, c2] = await Promise.all([
+        apiFetch('/manage/drug-categories1/?page_size=500'),
+        apiFetch('/manage/drug-categories2/?page_size=500'),
+    ]);
+    cat1List = c1.results;
+    cat2List = c2.results;
+    renderCategories();
+}
+
+function openCategoryModal(level, category = null) {
+    const label = level === 'cat1' ? '분류' : '세부 분류';
+    const schedule = level === 'cat1'
+        ? `<div class="toggle-row">
+               <label class="toggle"><input type="checkbox" id="cm-schedule"${category && category.uses_dosage_schedule ? ' checked' : ''}>
+               <span>처방할 때 복용스케줄(1회량·횟수·일수)로 입력</span></label>
+           </div>
+           <p class="modal-note">끄면 진료팀이 수량을 직접 입력합니다 (외용약·주사제처럼).</p>`
+        : '';
+    openModal({
+        title: category ? `${label} 수정` : `${label} 추가`,
+        bodyHtml: `
+            <label class="field-label" for="cm-name">${label} 이름 *</label>
+            <input class="field-input" type="text" id="cm-name" maxlength="50" value="${escapeHtml(category ? category.name : '')}">
+            ${schedule}
+            <p class="error-message" id="cm-error"></p>`,
+        confirmLabel: category ? '저장' : '추가',
+        onConfirm: () => { saveCategory(level, category); return false; },
+    });
+    byId('cm-name').focus();
+}
+
+async function saveCategory(level, category) {
+    if (isBusy) return;
+    const errorEl = byId('cm-error');
+    const name = byId('cm-name').value.trim();
+    if (!name) {
+        errorEl.textContent = '이름을 입력해주세요.';
+        return;
+    }
+    const body = { name };
+    if (level === 'cat1') body.uses_dosage_schedule = byId('cm-schedule').checked;
+
+    const base = level === 'cat1' ? '/manage/drug-categories1/' : '/manage/drug-categories2/';
+    isBusy = true;
+    try {
+        await apiFetch(category ? `${base}${category.id}/` : base, {
+            method: category ? 'PATCH' : 'POST',
+            body: JSON.stringify(body),
+        });
+    } catch (err) {
+        // 이름이 겹치면 서버가 name 필드 오류를 준다
+        errorEl.textContent = err.message.startsWith('name:') ? '같은 이름이 이미 있습니다.' : err.message;
+        return;
+    } finally {
+        isBusy = false;
+    }
+    closeModal();
+    showToast(category ? '저장했습니다.' : `${name}을(를) 추가했습니다.`);
+    await loadCategories();
+    loadDrugs();    // 약품 목록의 분류 이름도 바뀌었을 수 있다
+}
+
+['cat1-list', 'cat2-list'].forEach((listId) => {
+    byId(listId).addEventListener('click', (e) => {
+        const row = e.target.closest('.admin-row');
+        const action = e.target.dataset.action;
+        if (!row || !action) return;
+        const level = row.dataset.level;
+        const list = level === 'cat1' ? cat1List : cat2List;
+        const category = list.find((c) => c.id === Number(row.dataset.id));
+        if (!category) return;
+        if (action === 'edit') openCategoryModal(level, category);
+        if (action === 'delete') {
+            const base = level === 'cat1' ? '/manage/drug-categories1/' : '/manage/drug-categories2/';
+            confirmDelete({
+                title: level === 'cat1' ? '분류 삭제' : '세부 분류 삭제',
+                name: category.name,
+                path: `${base}${category.id}/`,
+                onDone: loadCategories,
+            });
+        }
+    });
+});
+
+document.querySelectorAll('[data-add-category]').forEach((btn) => {
+    btn.addEventListener('click', () => openCategoryModal(btn.dataset.addCategory));
+});
+
+// ----- 약품 -----
+
+function drugRowHtml(d) {
+    const sub = [d.ingredient, d.usage].filter(Boolean).join(' · ');
+    return `
+        <div class="admin-row" data-id="${d.id}">
+            <span class="admin-row-main">
+                <span class="admin-row-title">${escapeHtml(d.name)}</span>
+                ${sub ? `<span class="admin-row-sub">${escapeHtml(sub)}</span>` : ''}
+            </span>
+            <span class="admin-row-tags">
+                <span class="doctor-tag waiting">${escapeHtml(d.cat1_name)}</span>
+                <span class="doctor-tag waiting">${escapeHtml(d.cat2_name)}</span>
+            </span>
+            <span class="admin-row-actions">
+                <button type="button" class="btn-secondary btn-small" data-action="edit">수정</button>
+                <button type="button" class="row-delete" data-action="delete">삭제</button>
+            </span>
+        </div>`;
+}
+
+async function loadDrugs() {
+    const seq = ++drugRequestSeq;
+    const params = new URLSearchParams({ page_size: '500' });
+    const search = byId('drug-search').value.trim();
+    if (search) params.set('search', search);
+    if (byId('drug-filter-cat1').value) params.set('cat1', byId('drug-filter-cat1').value);
+    if (byId('drug-filter-cat2').value) params.set('cat2', byId('drug-filter-cat2').value);
+    try {
+        const data = await apiFetch(`/manage/drugs/?${params}`);
+        if (seq !== drugRequestSeq) return;
+        drugList = data.results;
+        byId('drug-count').textContent = `${data.count}종`;
+        byId('drug-list').innerHTML = drugList.length === 0
+            ? emptyRowHtml(search || params.has('cat1') || params.has('cat2') ? '조건에 맞는 약품이 없습니다.' : '등록된 약품이 없습니다.')
+            : drugList.map(drugRowHtml).join('');
+    } catch (err) {
+        if (seq !== drugRequestSeq) return;
+        byId('drug-list').innerHTML = `<p class="empty-text is-error">${escapeHtml(err.message)}</p>`;
+    }
+}
+
+function openDrugModal(drug = null) {
+    if (cat1List.length === 0 || cat2List.length === 0) {
+        showToast('아래 분류 카드에서 분류와 세부 분류를 먼저 추가해주세요.', true);
+        return;
+    }
+    const value = (field) => escapeHtml(drug ? drug[field] : '');
+    openModal({
+        title: drug ? '약품 수정' : '약품 추가',
+        bodyHtml: `
+            <label class="field-label" for="dm-name">약품명 *</label>
+            <input class="field-input" type="text" id="dm-name" maxlength="100" value="${value('name')}">
+            <label class="field-label" for="dm-ingredient">성분</label>
+            <input class="field-input" type="text" id="dm-ingredient" maxlength="200" value="${value('ingredient')}">
+            <label class="field-label" for="dm-usage">용법</label>
+            <input class="field-input" type="text" id="dm-usage" maxlength="200" placeholder="예: 식후 30분" value="${value('usage')}">
+            <div class="form-grid">
+                <div>
+                    <label class="field-label" for="dm-cat1">분류 *</label>
+                    <select class="field-input" id="dm-cat1">${optionsHtml(cat1List, drug ? drug.cat1 : '', '선택')}</select>
+                </div>
+                <div>
+                    <label class="field-label" for="dm-cat2">세부 분류 *</label>
+                    <select class="field-input" id="dm-cat2">${optionsHtml(cat2List, drug ? drug.cat2 : '', '선택')}</select>
+                </div>
+            </div>
+            <p class="error-message" id="dm-error"></p>`,
+        confirmLabel: drug ? '저장' : '추가',
+        onConfirm: () => { saveDrug(drug); return false; },
+    });
+    byId('dm-name').focus();
+}
+
+async function saveDrug(drug) {
+    if (isBusy) return;
+    const errorEl = byId('dm-error');
+    const body = {
+        name: byId('dm-name').value.trim(),
+        ingredient: byId('dm-ingredient').value.trim(),
+        usage: byId('dm-usage').value.trim(),
+        cat1: Number(byId('dm-cat1').value),
+        cat2: Number(byId('dm-cat2').value),
+    };
+    if (!body.name) { errorEl.textContent = '약품명을 입력해주세요.'; return; }
+    if (!body.cat1 || !body.cat2) { errorEl.textContent = '분류와 세부 분류를 골라주세요.'; return; }
+
+    isBusy = true;
+    try {
+        await apiFetch(drug ? `/manage/drugs/${drug.id}/` : '/manage/drugs/', {
+            method: drug ? 'PATCH' : 'POST',
+            body: JSON.stringify(body),
+        });
+    } catch (err) {
+        errorEl.textContent = err.message;
+        return;
+    } finally {
+        isBusy = false;
+    }
+    closeModal();
+    showToast(drug ? '저장했습니다.' : `${body.name}을(를) 추가했습니다.`);
+    loadDrugs();
+}
+
+byId('drug-list').addEventListener('click', (e) => {
+    const row = e.target.closest('.admin-row');
+    const action = e.target.dataset.action;
+    if (!row || !action) return;
+    const drug = drugList.find((d) => d.id === Number(row.dataset.id));
+    if (!drug) return;
+    if (action === 'edit') openDrugModal(drug);
+    if (action === 'delete') {
+        confirmDelete({ title: '약품 삭제', name: drug.name, path: `/manage/drugs/${drug.id}/`, onDone: loadDrugs });
+    }
+});
+
+byId('drug-add-btn').addEventListener('click', () => openDrugModal());
+byId('drug-search').addEventListener('input', () => {
+    clearTimeout(drugSearchTimer);
+    drugSearchTimer = setTimeout(loadDrugs, 300);   // 글자마다 요청하지 않게 잠깐 기다린다
+});
+byId('drug-filter-cat1').addEventListener('change', loadDrugs);
+byId('drug-filter-cat2').addEventListener('change', loadDrugs);
+
+TAB_LOADERS.drugs = async () => {
+    try {
+        await loadCategories();
+    } catch (err) {
+        byId('cat1-list').innerHTML = `<p class="empty-text is-error">${escapeHtml(err.message)}</p>`;
+    }
+    loadDrugs();
+};
 
 
 // =====================================================

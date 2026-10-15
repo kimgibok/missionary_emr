@@ -96,8 +96,42 @@
         <!-- ===== 약품 ===== -->
         <div class="tab-panel" id="tab-drugs" role="tabpanel" hidden>
             <section class="card">
-                <h2 class="card-title">약품</h2>
-                <p class="empty-text">다음 단계에서 만듭니다.</p>
+                <div class="card-head">
+                    <h2 class="card-title">약품</h2>
+                    <div class="card-head-side">
+                        <span class="count-badge" id="drug-count">0종</span>
+                        <button class="btn-primary btn-inline" type="button" id="drug-add-btn">약품 추가</button>
+                    </div>
+                </div>
+                <div class="admin-filters">
+                    <input class="field-input" type="search" id="drug-search" placeholder="약품명·성분으로 찾기">
+                    <select class="field-input" id="drug-filter-cat1" aria-label="분류로 거르기"></select>
+                    <select class="field-input" id="drug-filter-cat2" aria-label="세부 분류로 거르기"></select>
+                </div>
+                <div id="drug-list" class="admin-list"></div>
+            </section>
+
+            <section class="card">
+                <div class="card-head">
+                    <h2 class="card-title">분류</h2>
+                </div>
+                <p class="section-hint">분류는 엑셀 시트 탭(경구·외용·소아 …), 세부 분류는 약리 분류(항생제·진통제 …)입니다. 쓰이고 있는 분류는 삭제할 수 없습니다.</p>
+                <div class="category-columns">
+                    <div>
+                        <div class="category-column-head">
+                            <h3 class="form-section-title">분류</h3>
+                            <button class="btn-secondary btn-small" type="button" data-add-category="cat1">추가</button>
+                        </div>
+                        <div id="cat1-list" class="admin-list"></div>
+                    </div>
+                    <div>
+                        <div class="category-column-head">
+                            <h3 class="form-section-title">세부 분류</h3>
+                            <button class="btn-secondary btn-small" type="button" data-add-category="cat2">추가</button>
+                        </div>
+                        <div id="cat2-list" class="admin-list"></div>
+                    </div>
+                </div>
             </section>
         </div>
 

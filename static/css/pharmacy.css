@@ -13,14 +13,6 @@
 }
 
 /* ---------- 자동 출력 스위치 ---------- */
-.card-head-side {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    gap: 10px;
-}
-
 /* 조제지 용지 선택 (기기마다 저장) */
 .paper-select.field-input {
     width: auto;
