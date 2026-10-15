@@ -56,10 +56,10 @@ missionary_emr/
 │   ├─ roles/               info.html, reception.html, clinical.html, pharmacy.html, admin.html
 │   └─ partials/            nav.html, modal.html, patient_intake_modal.html
 ├─ static/
-│   ├─ css/                 base.css(토큰·공통 컴포넌트), login, nav, page, modal, info, reception, clinical, pharmacy(조제지 인쇄 포함)
+│   ├─ css/                 base.css(토큰·공통 컴포넌트), login, nav, page, modal, info, reception, clinical, pharmacy(조제지 인쇄 포함), admin
 │   ├─ js/                  api.js, common.js(escapeHtml·showToast·patientMeta·doctorLabel·byId),
 │   │                       nav.js, modal.js, login.js, select_mission.js,
-│   │                       patient-intake.js, info.js, reception.js, clinical.js, pharmacy.js
+│   │                       patient-intake.js, info.js, reception.js, clinical.js, pharmacy.js, admin.js
 │   └─ fonts/               Pretendard-{Regular,Medium,SemiBold,Bold}.woff2
 └─ db/emr.db                (gitignore)
 ```
@@ -182,6 +182,7 @@ POST처럼 대상 객체가 없는 요청은 뷰의 `perform_create`에서 `owns
 - API 호출은 반드시 `static/js/api.js`의 `apiFetch()`를 거친다(토큰 부착, 401이면 로그인 화면으로, 오류 메시지 가공).
 - 사람이 입력한 문자열을 `innerHTML`에 넣을 때는 `escapeHtml()`을 거친다.
 - 여러 페이지가 쓰는 화면 도우미(`escapeHtml`, `showToast`, `patientMeta`, `doctorLabel`, `byId`)는 `common.js`에만 둔다. 페이지 js에 다시 정의하지 않는다 — 일반 `<script>`끼리는 `const`·`let` 이름을 공유해서, `const byId`가 두 번 있으면 페이지 전체가 멈춘다.
+- 탭(`.tab-bar` / `.tab-button` / `.active`, 애플 세그먼트 모양)은 `base.css` 공용이다(약국·관리자). 페이지 js에서 탭 버튼을 찾을 때는 `#main-tabs` 안에서만 찾는다(기간 선택처럼 같은 모양의 다른 버튼과 섞이지 않게).
 - 디자인 토큰(색·반경·그림자)은 `base.css`의 `:root` 변수만 쓴다. 공통 컴포넌트(`.card`, `.field-input`, `.btn-primary`, `.toggle`, `.queue-item` 등)는 `base.css` 또는 공용 css에서 재사용하고 페이지마다 복제하지 않는다.
 - 디자인 톤: **애플 스타일** — 여백 넉넉, 은은한 그림자, 둥근 모서리, 깔끔한 타이포. 등록번호만 점선 테두리 + `tabular-nums`로 "번호표" 느낌을 낸다. 못생기게 만들지 않는다.
 - 확인·입력용 팝업은 브라우저 기본 `alert/prompt/confirm` 대신 `openModal()` / `closeModal()`과 `showToast()`를 쓴다.
@@ -230,7 +231,8 @@ POST처럼 대상 객체가 없는 요청은 뷰의 `perform_create`에서 `owns
   현장 피드백을 받아 필요 없으면 뺀다(다음 미션 계획용 정보는 관리자 '다음 미션 준비표'로).
 - 조제지 실제 프린터 출력 확인: 아직 못 해 봤다(영수증 프린터 예정, 80mm·58mm·A4는 크롬 PDF로만 확인). 현장 프린터가 정해지면 `--kiosk-printing`과 드라이버 용지·자르기 설정을 같이 확인한다.
 - 관리자 프론트엔드 (`feature/frontend-admin`) — 1단계 백엔드 정리 완료(재고 규칙·보정 이력·통계·엑셀)
-  - 남은 것: 2단계 화면 골격(미션 탭 + [통계 | 약품 | 창고 재고 | 미션 재고 | 설정]) → 3 통계 → 4 약품 → 5 창고·미션 재고·정산·보정 → 6 설정(시간대)
+  - 2단계 화면 골격 완료: 탭 [통계 | 미션 재고 | 창고 재고 | 약품 | 설정], 미션 칩(통계·미션 재고 탭에서만, 진행중 먼저, 고른 미션 기억)
+  - 남은 것: 3 통계 → 4 약품 → 5 창고·미션 재고·정산·보정 → 6 설정(시간대)
   - 미션 생성과 계정 역할 배정(`MissionMembership`)은 Django admin에 둔다.
   - 약 통계(미션 선택 가능, 엑셀 포함): 분류(cat1·cat2)별·진료과별 사용량, 그리고 다음 미션 준비표(약마다 챙겨 간 양·쓴 양·남은 양·하루 평균).
     약국 화면은 "오늘 일하는 화면", 관리자는 "돌아보고 다음 미션을 계획하는 화면"으로 나눈다. 약국팀장도 필요하면 같은 API를 약국 탭에 붙인다.

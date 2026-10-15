@@ -4,19 +4,80 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ 관리자 }} · 의료선교 EMR</title>
+    <title>관리자 · 의료선교 EMR</title>
     <link rel="stylesheet" href="{% static_v 'css/base.css' %}">
     <link rel="stylesheet" href="{% static_v 'css/nav.css' %}">
     <link rel="stylesheet" href="{% static_v 'css/page.css' %}">
+    <link rel="stylesheet" href="{% static_v 'css/modal.css' %}">
+    <link rel="stylesheet" href="{% static_v 'css/reception.css' %}">
+    <link rel="stylesheet" href="{% static_v 'css/admin.css' %}">
 </head>
 <body>
     {% include 'partials/nav.html' %}
     <main class="page-content">
-        <h1>{{ 관리자 }}</h1>
-        <p style="color: var(--color-text-muted); margin-top: 8px;">준비중입니다.</p>
+        <h1>관리자</h1>
+
+        <div class="tab-bar" id="main-tabs" role="tablist" aria-label="관리자 화면">
+            <button type="button" class="tab-button" role="tab" data-tab="stats">통계</button>
+            <button type="button" class="tab-button" role="tab" data-tab="mission-stock">미션 재고</button>
+            <button type="button" class="tab-button" role="tab" data-tab="warehouse">창고 재고</button>
+            <button type="button" class="tab-button" role="tab" data-tab="drugs">약품</button>
+            <button type="button" class="tab-button" role="tab" data-tab="settings">설정</button>
+        </div>
+
+        <!-- 미션 선택 - 미션별 탭(통계·미션 재고)에서만 보인다 -->
+        <div class="mission-bar" id="mission-bar" hidden>
+            <div class="mission-chips" id="mission-chips" role="radiogroup" aria-label="미션 선택"></div>
+        </div>
+
+        <!-- ===== 통계 ===== -->
+        <div class="tab-panel" id="tab-stats" role="tabpanel" hidden>
+            <section class="card">
+                <h2 class="card-title">통계</h2>
+                <p class="empty-text">다음 단계에서 만듭니다.</p>
+            </section>
+        </div>
+
+        <!-- ===== 미션 재고 ===== -->
+        <div class="tab-panel" id="tab-mission-stock" role="tabpanel" hidden>
+            <section class="card">
+                <h2 class="card-title">미션 재고</h2>
+                <p class="empty-text">다음 단계에서 만듭니다.</p>
+            </section>
+        </div>
+
+        <!-- ===== 창고 재고 ===== -->
+        <div class="tab-panel" id="tab-warehouse" role="tabpanel" hidden>
+            <section class="card">
+                <h2 class="card-title">창고 재고</h2>
+                <p class="empty-text">다음 단계에서 만듭니다.</p>
+            </section>
+        </div>
+
+        <!-- ===== 약품 ===== -->
+        <div class="tab-panel" id="tab-drugs" role="tabpanel" hidden>
+            <section class="card">
+                <h2 class="card-title">약품</h2>
+                <p class="empty-text">다음 단계에서 만듭니다.</p>
+            </section>
+        </div>
+
+        <!-- ===== 설정 ===== -->
+        <div class="tab-panel" id="tab-settings" role="tabpanel" hidden>
+            <section class="card">
+                <h2 class="card-title">설정</h2>
+                <p class="empty-text">다음 단계에서 만듭니다.</p>
+            </section>
+        </div>
     </main>
 
+    {% include 'partials/modal.html' %}
+    <div class="toast" id="toast" role="status"></div>
+
     <script src="{% static_v 'js/api.js' %}"></script>
+    <script src="{% static_v 'js/common.js' %}"></script>
     <script src="{% static_v 'js/nav.js' %}"></script>
+    <script src="{% static_v 'js/modal.js' %}"></script>
+    <script src="{% static_v 'js/admin.js' %}"></script>
 </body>
 </html>

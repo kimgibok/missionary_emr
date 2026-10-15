@@ -146,33 +146,6 @@
     color: var(--color-danger);
 }
 
-/* ---------- 탭 (조제 | 재고 | 통계) - 애플 세그먼트 컨트롤 모양 ---------- */
-.tab-bar {
-    display: flex;
-    gap: 4px;
-    padding: 4px;
-    margin: 16px 0 20px;
-    background: var(--color-border);
-    border-radius: 12px;
-}
-
-.tab-button {
-    flex: 1;
-    min-height: 44px;
-    border-radius: 9px;
-    font-size: 15px;
-    font-weight: 500;
-    color: var(--color-text-muted);
-    transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
-}
-
-.tab-button.active {
-    background: var(--color-surface);
-    color: var(--color-text);
-    font-weight: 600;
-    box-shadow: var(--shadow);
-}
-
 /* ---------- 재고 탭 ---------- */
 .stock-list {
     display: flex;

@@ -1,0 +1,60 @@
+/* 관리자 - reception.css(카드 머리·배지·태그·토스트) 다음에 불러온다. 탭은 base.css */
+
+/* ---------- 미션 선택 (가로로 넘기는 칩) ---------- */
+.mission-bar {
+    margin: -8px 0 20px;
+}
+
+.mission-chips {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding: 2px 2px 6px;
+    scroll-snap-type: x proximity;
+    scrollbar-width: thin;
+}
+
+.mission-chip {
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    min-height: 44px;
+    padding: 8px 14px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    text-align: left;
+    scroll-snap-align: start;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.mission-chip.active {
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 1px var(--color-accent);
+}
+
+.mission-chip-top {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.mission-chip-name {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--color-text);
+}
+
+.mission-chip-date {
+    font-size: 12px;
+    color: var(--color-text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+/* "진행중" 배지 - reception.css의 .doctor-tag를 작게 */
+.mission-chip .doctor-tag {
+    padding: 1px 7px;
+    font-size: 11px;
+}
