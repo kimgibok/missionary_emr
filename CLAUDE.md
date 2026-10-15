@@ -248,6 +248,8 @@ POST처럼 대상 객체가 없는 요청은 뷰의 `perform_create`에서 `owns
   (페이지 js끼리 `const` 이름이 겹치면 SyntaxError로 페이지 전체가 멈추니, 옛 파일과 새 파일이 섞인 것처럼 보이면 먼저 새로고침해 본다.) 계정을 바꿔 테스트할 때는 로그아웃 후 재로그인한다(`localStorage`에 이름·권한이 남는다).
 - Windows cmd에서 curl로 한글 파라미터를 보낼 때는 `curl -G <URL> --data-urlencode "search=한글"`을 쓴다. 헤더는 `Authorization: Token <키>`(`Token` 단어와 공백 필수).
 - 개발용 설정이 남아 있다: `ALLOWED_HOSTS = ['*']`, `DEBUG = True`. 현장 배포 전에 `config/local_settings.py`에서 허용 IP를 좁히고 `DEBUG = False`, 새 `SECRET_KEY`를 넣는다.
-- SQLite 한 파일에 여러 기기가 동시에 쓴다. 번호 발급·재고 차감처럼 겹치기 쉬운 곳은 트랜잭션과 `select_for_update()`를 지키고, 현장 투입 전에 동시 접속 부하를 확인한다.
+- SQLite 한 파일에 여러 기기가 동시에 쓴다. SQLite는 `select_for_update()`를 무시하므로 `settings.py`의 DB 옵션 `transaction_mode: IMMEDIATE`(+ `timeout: 20`)로
+  `transaction.atomic()`이 시작할 때 쓰기 잠금을 잡게 했다. 이 옵션이 없으면 동시 방문 등록 10건 중 8건이 `database is locked` 500으로 실패했다.
+  번호 발급·재고 차감처럼 겹치기 쉬운 곳은 반드시 `transaction.atomic()` 안에서 읽고 쓴다(`select_for_update()`는 다른 DB로 옮길 때를 위해 그대로 둔다).
 - 테스트용 계정 비밀번호·토큰은 문서나 커밋에 적지 않는다.
 - Role 이름이나 Department 약어를 admin에서 바꾸면 코드의 문자열 비교(`'진료팀'` 등)와 어긋날 수 있다. 바꾸기 전에 코드를 같이 확인한다.
