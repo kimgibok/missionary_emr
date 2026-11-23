@@ -1,5 +1,6 @@
 // hideCancel: 보기만 하는 모달(이력 등)은 [취소] 없이 확인 버튼 하나만 둔다
-function openModal({ title, bodyHtml, confirmLabel = '확인', onConfirm, hideCancel = false }) {
+// wide: 표가 들어가는 모달(한꺼번에 정산 등)은 넓게
+function openModal({ title, bodyHtml, confirmLabel = '확인', onConfirm, hideCancel = false, wide = false }) {
     const overlay = document.getElementById('modal-overlay');
     document.getElementById('modal-title').textContent = title;
     document.getElementById('modal-body').innerHTML = bodyHtml;
@@ -19,6 +20,7 @@ function openModal({ title, bodyHtml, confirmLabel = '확인', onConfirm, hideCa
     const cancelBtn = document.getElementById('modal-cancel');
     cancelBtn.onclick = close;
     cancelBtn.hidden = hideCancel;
+    overlay.querySelector('.modal-box').classList.toggle('is-wide', wide);
     overlay.classList.add('open');
 }
 

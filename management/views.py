@@ -63,6 +63,27 @@ def parse_adjustment(request):
     return qty, reason
 
 
+def settle_stock(stock, donated):
+    """
+    미션 재고 하나 정산 - transaction.atomic() 안에서 부른다. 창고로 돌려준 양을 반환.
+    오류 메시지에 약 이름을 넣어 한꺼번에 정산할 때도 어느 약인지 알 수 있게 한다.
+    """
+    name = f'{stock.drugbatch.drug.name} (유통기한 {stock.drugbatch.expiry_date})'
+    if stock.is_settled:
+        raise ValidationError({'detail': f'{name}: 이미 정산한 재고입니다.'})
+    if donated > stock.remaining_qty:
+        raise ValidationError({'detail': f'{name}: 기부량이 현장 잔량({stock.remaining_qty})보다 많습니다.'})
+    # 조회한 뒤 다른 요청이 잔량·정산 상태를 바꿨으면 정산하지 않는다
+    ok = MissionStock.objects.filter(
+        id=stock.id, is_settled=False, remaining_qty=stock.remaining_qty,
+    ).update(is_settled=True, donated_qty=donated)
+    if not ok:
+        raise ValidationError({'detail': f'{name}: 그 사이 재고가 바뀌었습니다. 새로고침 후 다시 정산하세요.'})
+    returned = stock.remaining_qty - donated
+    return_to_warehouse(stock.drugbatch_id, returned)
+    return returned
+
+
 class ProtectedDeleteMixin:
     """다른 데이터가 쓰고 있어(PROTECT) 못 지우면 500 대신 400으로 알려준다"""
     protected_message = '다른 데이터에서 쓰고 있어 삭제할 수 없습니다.'
@@ -227,18 +248,7 @@ class MissionStockViewSet(viewsets.ModelViewSet):
         donated = parse_count(request.data.get('donated_qty', 0), '기부량')
         with transaction.atomic():
             stock = self.get_object()
-            if stock.is_settled:
-                raise ValidationError({'detail': '이미 정산한 재고입니다.'})
-            if donated > stock.remaining_qty:
-                raise ValidationError({'detail': f'기부량이 현장 잔량({stock.remaining_qty})보다 많습니다.'})
-            # 조회한 뒤 다른 요청이 잔량·정산 상태를 바꿨으면 정산하지 않는다
-            ok = MissionStock.objects.filter(
-                id=stock.id, is_settled=False, remaining_qty=stock.remaining_qty,
-            ).update(is_settled=True, donated_qty=donated)
-            if not ok:
-                raise ValidationError({'detail': '그 사이 재고가 바뀌었습니다. 새로고침 후 다시 정산하세요.'})
-            returned = stock.remaining_qty - donated
-            return_to_warehouse(stock.drugbatch_id, returned)
+            returned = settle_stock(stock, donated)
 
         warehouse_left = DrugBatch.objects.get(id=stock.drugbatch_id).remaining_qty
         return Response({
@@ -246,6 +256,36 @@ class MissionStockViewSet(viewsets.ModelViewSet):
             'returned_qty': returned,
             'drugbatch_remaining_qty': warehouse_left,
         })
+
+    @action(detail=False, methods=['post'], url_path='settle-bulk')
+    def settle_bulk(self, request):
+        """
+        한꺼번에 정산 {items: [{id, donated_qty}, ...]} - 하나라도 안 되면 전부 취소(모두 정산 전 그대로).
+        donated_qty를 빼면 0(기부 없음)으로 본다.
+        """
+        items = request.data.get('items')
+        if not isinstance(items, list) or not items:
+            raise ValidationError({'detail': '정산할 재고를 하나 이상 골라주세요.'})
+
+        parsed = []
+        for entry in items:
+            if not isinstance(entry, dict):
+                raise ValidationError({'detail': '정산 항목 형식이 올바르지 않습니다.'})
+            stock_id = parse_count(entry.get('id'), '재고 번호')
+            parsed.append((stock_id, parse_count(entry.get('donated_qty', 0), '기부량')))
+        if len({stock_id for stock_id, _ in parsed}) != len(parsed):
+            raise ValidationError({'detail': '같은 재고가 두 번 들어 있습니다.'})
+
+        stocks = MissionStock.objects.select_related('drugbatch__drug').in_bulk([stock_id for stock_id, _ in parsed])
+        returned_total = 0
+        with transaction.atomic():
+            for stock_id, donated in parsed:
+                stock = stocks.get(stock_id)
+                if stock is None:
+                    raise ValidationError({'detail': f'없는 재고입니다. (번호 {stock_id}) 새로고침 후 다시 시도하세요.'})
+                returned_total += settle_stock(stock, donated)
+
+        return Response({'settled': len(parsed), 'returned_qty': returned_total})
 
 
 class StockAdjustmentListView(generics.ListAPIView):

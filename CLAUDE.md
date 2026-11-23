@@ -149,7 +149,7 @@ superuser는 백엔드 권한을 전부 통과하므로 nav에서 모든 역할 
 | 처방약 수정 | `PATCH prescription-drugs/<pk>/` = 약국팀용(수량만 믿고 재계산 안 함), `PATCH/DELETE prescription-drugs/<pk>/clinical/` = 진료팀용(재계산됨) |
 | 조회용 | `GET departments/`, `drug-categories1/`, `drug-categories2/`, `drugs/` (진료팀 약 검색, MissionStock 기준, `?search=&cat1=&cat2=`) |
 | 약국 | `GET mission-stocks/`, `GET prescription-drugs/stats/?period=day&date= \| ?period=mission`(수령된 약만: summary·drugs + 미션 기준 runway), `GET visits/pharmacy-queue/`(오늘, 등록번호순), `GET visits/pharmacy-done/`(오늘 수령, 최신순), `GET visits/<id>/dispense-options/`, `POST visits/<id>/dispense/` `{items:[{prescription_drug, mission_stock}]}`, `POST visits/<id>/undispense/`, `POST visits/print-claim/` `{ids}` → `{claimed}` (조제 대기·조제 화면 응답에 `slip_printed_at`, `stock_issues`) |
-| 관리자 `manage/` | `GET missions/`(`is_active`), `GET visits/stats/?mission=`(진료과별 환자 수·전체 방문·실제 환자, 진료 완료 기준), `GET drug-stats/?mission=`(분류별·진료과별 사용량, 다음 미션 준비표, 수령 기준), `GET mission-stocks/export/?mission=`(통계 시트 4개 + `재고-분류` 시트), `GET stock-adjustments/?drugbatch=\|mission_stock=`, 그리고 라우터 CRUD: `drug-categories1`, `drug-categories2`, `drugs`(`?search=&cat1=&cat2=`), `drug-batches`(`?drug=&search=`, `POST <id>/adjust/`), `mission-stocks`(`?mission=&search=`, `POST <id>/adjust/`, `POST <id>/settle/`). 사용 중인 항목 삭제는 400 |
+| 관리자 `manage/` | `GET missions/`(`is_active`), `GET visits/stats/?mission=`(진료과별 환자 수·전체 방문·실제 환자, 진료 완료 기준), `GET drug-stats/?mission=`(분류별·진료과별 사용량, 다음 미션 준비표, 수령 기준), `GET mission-stocks/export/?mission=`(통계 시트 4개 + `재고-분류` 시트), `GET stock-adjustments/?drugbatch=\|mission_stock=`, 그리고 라우터 CRUD: `drug-categories1`, `drug-categories2`, `drugs`(`?search=&cat1=&cat2=`), `drug-batches`(`?drug=&search=`, `POST <id>/adjust/`), `mission-stocks`(`?mission=&search=`, `POST <id>/adjust/`, `POST <id>/settle/`, `POST settle-bulk/` `{items:[{id, donated_qty}]}` 하나라도 틀리면 전부 취소). 사용 중인 항목 삭제는 400 |
 
 권한 클래스(`clinic/permissions.py`): `IsInfoTeam`, `IsReceptionTeam`, `IsClinicalTeam`, `IsPharmacyTeam`와 조합용(`IsInfoOrReceptionTeam` 등).
 모두 `role_permission(*역할이름)` 팩토리로 만들며, **superuser는 항상 통과**한다. 역할 이름 문자열('안내팀', '접수팀', '진료팀', '약국팀')은 DB의 `Role.name`과 정확히 같아야 한다.
@@ -237,7 +237,8 @@ POST처럼 대상 객체가 없는 요청은 뷰의 `perform_create`에서 `owns
   - 3단계 통계 탭 완료: 요약 4칸, 진료과 × 소아/성인 × 성별 표, 약 분류(분류/세부 분류)·진료과별(펼치면 약 목록) 사용량, 다음 미션 준비표, 엑셀 다운로드(`apiDownload`)
   - 4단계 약품 탭 완료: 약품 검색·분류 필터·추가·수정·삭제(모달), 분류·세부 분류 추가·수정·삭제(분류는 복용스케줄 입력 여부). 목록 한 줄은 `.admin-row`, 삭제 확인은 `confirmDelete()`
   - 5-1단계 창고 재고 탭 완료: 입고 추가·수정·삭제(약품 분류별 선택), 출처·잔량 필터, 잔량 보정(`openAdjustModal`)·보정 이력(`openHistoryModal`) - 두 모달은 미션 재고와 공용
-  - 남은 것: 5-2 미션 재고(배분·배분량 수정·정산·현장 잔량 보정) → 6 설정(시간대)
+  - 5-2단계 미션 재고 탭 완료: 배분 추가(창고에 남은·이 미션에 없는 배치), 배분량 수정, 현장 잔량 보정·이력, 정산(한 줄 / 한꺼번에 - 기부량만 입력, 진행 중 미션이면 경고), 정산·상태·분류 필터
+  - 남은 것: 6 설정(시간대)
   - 미션 생성과 계정 역할 배정(`MissionMembership`)은 Django admin에 둔다.
   - 약 통계(미션 선택 가능, 엑셀 포함): 분류(cat1·cat2)별·진료과별 사용량, 그리고 다음 미션 준비표(약마다 챙겨 간 양·쓴 양·남은 양·하루 평균).
     약국 화면은 "오늘 일하는 화면", 관리자는 "돌아보고 다음 미션을 계획하는 화면"으로 나눈다. 약국팀장도 필요하면 같은 API를 약국 탭에 붙인다.

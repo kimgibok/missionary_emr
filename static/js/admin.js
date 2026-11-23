@@ -5,6 +5,7 @@
 //   3. 통계 탭 - 요약, 진료과별 환자 수, 약 분류별·진료과별 사용량, 다음 미션 준비표, 엑셀 다운로드
 //   4. 약품 탭 - 약품·분류·세부 분류 추가·수정·삭제, 검색
 //   5. 창고 재고 탭 - 입고 배치 추가·수정·삭제, 잔량 보정·이력 (보정·이력 모달은 미션 재고와 공용)
+//   6. 미션 재고 탭 - 배분 추가, 배분량 수정, 현장 잔량 보정, 정산(한 줄 / 한꺼번에), 삭제
 // escapeHtml, showToast, byId는 common.js
 // =====================================================
 
@@ -869,6 +870,358 @@ byId('batch-filter-source').addEventListener('change', renderBatches);
 byId('batch-filter-stock').addEventListener('change', renderBatches);
 
 TAB_LOADERS.warehouse = loadBatches;
+
+
+// =====================================================
+// 6. 미션 재고 탭 - 고른 미션에 배분된 배치 (검색·필터는 화면에서)
+// =====================================================
+
+let msList = [];                // 고른 미션의 미션 재고 (서버 응답 그대로)
+let msRequestSeq = 0;
+
+// 0 이상의 정수 입력값 (비었거나 이상하면 NaN)
+function readCount(id) {
+    const raw = byId(id).value.trim();
+    const n = Number(raw);
+    return raw !== '' && Number.isInteger(n) && n >= 0 ? n : NaN;
+}
+
+function msLabel(s) {
+    return `${s.drug_name} · 유통기한 ${s.expiry_date} · ${s.source_display}`;
+}
+
+// 진행 중인 미션을 정산하면 약국이 그 배치를 더 못 쓴다 - 모달에 경고
+function activeMissionWarning() {
+    return currentMission && currentMission.is_active
+        ? '<p class="error-message">아직 진행 중인 미션입니다. 정산한 배치는 약국에서 더 조제할 수 없어요.</p>'
+        : '';
+}
+
+function msRowHtml(s) {
+    const expired = s.expiry_date < todayStr() ? ' (지남)' : '';
+    const usedTag = `<span class="doctor-tag waiting">사용 ${s.used_qty} (${Math.round(s.consumption_rate * 100)}%)</span>`;
+    const settledTag = s.is_settled
+        ? `<span class="doctor-tag">정산 완료 · 기부 ${s.donated_qty} · 반환 ${s.remaining_qty - s.donated_qty}</span>`
+        : '';
+    const actions = s.is_settled
+        ? '<button type="button" class="row-link" data-action="history">이력</button>'
+        : `<button type="button" class="btn-secondary btn-small" data-action="allocate">배분량 수정</button>
+           <button type="button" class="btn-secondary btn-small" data-action="adjust">잔량 보정</button>
+           <button type="button" class="btn-secondary btn-small" data-action="settle">정산</button>
+           <button type="button" class="row-link" data-action="history">이력</button>
+           <button type="button" class="row-delete" data-action="delete">삭제</button>`;
+    const state = s.is_settled ? ' is-settled' : (s.remaining_qty === 0 ? ' is-empty' : '');
+    return `
+        <div class="admin-row${state}" data-id="${s.id}">
+            <span class="admin-row-main">
+                <span class="admin-row-title">${escapeHtml(s.drug_name)}</span>
+                <span class="admin-row-sub">${joinParts([`유통기한 ${s.expiry_date}${expired}`, s.source_display, s.cat1_name])}</span>
+            </span>
+            <span class="admin-row-tags">${usedTag}${settledTag}</span>
+            <span class="admin-row-qty">
+                <span class="admin-row-qty-main">${s.remaining_qty} <small>/ ${s.allocated_qty}</small></span>
+                <span class="admin-row-qty-label">현장 잔량 / 배분량</span>
+            </span>
+            <span class="admin-row-actions">${actions}</span>
+        </div>`;
+}
+
+function renderMissionStocks() {
+    const keyword = byId('ms-search').value.trim().toLowerCase();
+    const status = byId('ms-filter-status').value;
+    const cat1 = byId('ms-filter-cat1').value;
+    const rows = msList.filter((s) => (!keyword
+            || s.drug_name.toLowerCase().includes(keyword)
+            || (s.ingredient || '').toLowerCase().includes(keyword))
+        && (!status || (status === 'settled') === s.is_settled)
+        && (!cat1 || s.cat1_name === cat1));
+
+    const open = msList.filter((s) => !s.is_settled).length;
+    byId('ms-summary').textContent =
+        `배치 ${msList.length}개 · 정산 전 ${open}개 · 정산 완료 ${msList.length - open}개`;
+    byId('ms-settle-bulk-btn').disabled = open === 0;
+    byId('ms-list').innerHTML = rows.length === 0
+        ? emptyRowHtml(msList.length === 0
+            ? '이 미션에 배분된 재고가 없습니다. [배분 추가]로 창고에서 챙겨 갈 배치를 고르세요.'
+            : '조건에 맞는 재고가 없습니다.')
+        : rows.map(msRowHtml).join('');
+}
+
+async function loadMissionStocks(mission) {
+    const seq = ++msRequestSeq;
+    try {
+        const data = await apiFetch(`/manage/mission-stocks/?mission=${mission.id}&page_size=500`);
+        if (seq !== msRequestSeq) return;
+        msList = data.results;
+        // 분류 필터 선택지 = 이 미션 재고에 있는 분류 (고른 값은 유지)
+        const cats = [...new Set(msList.map((s) => s.cat1_name))].sort();
+        const selected = byId('ms-filter-cat1').value;
+        byId('ms-filter-cat1').innerHTML = '<option value="">분류 전체</option>' + cats.map((c) =>
+            `<option value="${escapeHtml(c)}"${c === selected ? ' selected' : ''}>${escapeHtml(c)}</option>`).join('');
+        renderMissionStocks();
+    } catch (err) {
+        if (seq !== msRequestSeq) return;
+        byId('ms-list').innerHTML = `<p class="empty-text is-error">${escapeHtml(err.message)}</p>`;
+    }
+}
+
+function reloadMissionStocks() {
+    if (currentMission) loadMissionStocks(currentMission);
+}
+
+// ----- 배분 추가 -----
+
+async function openAllocateModal() {
+    if (!currentMission) return;
+    let batches;
+    try {
+        batches = (await apiFetch('/manage/drug-batches/?page_size=500')).results;
+    } catch (err) {
+        showToast(err.message, true);
+        return;
+    }
+    // 창고에 남아 있고, 이 미션에 아직 배분하지 않은 배치만
+    const taken = new Set(msList.map((s) => s.drugbatch));
+    const choices = batches.filter((b) => b.remaining_qty > 0 && !taken.has(b.id));
+    if (choices.length === 0) {
+        showToast('배분할 수 있는 창고 배치가 없습니다. 창고 재고 탭에서 입고를 먼저 등록하세요.', true);
+        return;
+    }
+    const options = choices.map((b) => `
+        <option value="${b.id}" data-left="${b.remaining_qty}">
+            ${escapeHtml(`${b.drug_name} · 유통기한 ${b.expiry_date} · ${b.source_display} · 창고 ${b.remaining_qty}`)}
+        </option>`).join('');
+
+    openModal({
+        title: '배분 추가',
+        bodyHtml: `
+            <p class="modal-note">${escapeHtml(currentMission.country)} · ${missionPeriodLabel(currentMission)} 미션에 챙겨 갈 배치를 고르세요.
+                배분한 만큼 창고에서 빠집니다.</p>
+            <label class="field-label" for="al-batch">창고 배치 *</label>
+            <select class="field-input" id="al-batch"><option value="">배치 선택</option>${options}</select>
+            <label class="field-label" for="al-qty">배분량 *</label>
+            <input class="field-input" type="number" id="al-qty" min="1" inputmode="numeric">
+            <p class="modal-note" id="al-left"></p>
+            <p class="error-message" id="al-error"></p>`,
+        confirmLabel: '배분',
+        onConfirm: () => { saveAllocation(); return false; },
+        wide: true,
+    });
+    byId('al-batch').addEventListener('change', () => {
+        const opt = byId('al-batch').selectedOptions[0];
+        byId('al-left').textContent = opt && opt.dataset.left ? `창고 잔량 ${opt.dataset.left}` : '';
+    });
+}
+
+async function saveAllocation() {
+    if (isBusy || !currentMission) return;
+    const errorEl = byId('al-error');
+    const opt = byId('al-batch').selectedOptions[0];
+    const qty = readCount('al-qty');
+    if (!opt || !opt.value) { errorEl.textContent = '창고 배치를 골라주세요.'; return; }
+    if (!(qty >= 1)) { errorEl.textContent = '배분량은 1 이상의 정수로 입력해주세요.'; return; }
+    if (qty > Number(opt.dataset.left)) { errorEl.textContent = `창고 잔량(${opt.dataset.left})보다 많이 배분할 수 없습니다.`; return; }
+
+    isBusy = true;
+    try {
+        await apiFetch('/manage/mission-stocks/', {
+            method: 'POST',
+            body: JSON.stringify({ drugbatch: Number(opt.value), mission: currentMission.id, allocated_qty: qty }),
+        });
+    } catch (err) {
+        errorEl.textContent = err.message;
+        return;
+    } finally {
+        isBusy = false;
+    }
+    closeModal();
+    showToast(`${qty}만큼 배분했습니다.`);
+    reloadMissionStocks();
+}
+
+// ----- 배분량 수정 -----
+
+function openAllocationEditModal(s) {
+    openModal({
+        title: '배분량 수정',
+        bodyHtml: `
+            <p class="modal-note">${escapeHtml(msLabel(s))}</p>
+            <p class="adjust-current">지금 배분량 <strong>${s.allocated_qty}</strong> · 현장 잔량 ${s.remaining_qty}</p>
+            <label class="field-label" for="ae-qty">새 배분량 *</label>
+            <input class="field-input" type="number" id="ae-qty" min="1" inputmode="numeric" value="${s.allocated_qty}">
+            <p class="modal-note">늘리면 그만큼 창고에서 더 빠지고, 줄이면 현장 잔량에서 창고로 돌려줍니다.
+                이미 쓴 양은 돌려줄 수 없어서 최대 ${s.remaining_qty}만큼 줄일 수 있어요.</p>
+            <p class="error-message" id="ae-error"></p>`,
+        confirmLabel: '저장',
+        onConfirm: () => { saveAllocationEdit(s); return false; },
+    });
+    byId('ae-qty').select();
+}
+
+async function saveAllocationEdit(s) {
+    if (isBusy) return;
+    const errorEl = byId('ae-error');
+    const qty = readCount('ae-qty');
+    if (!(qty >= 1)) { errorEl.textContent = '배분량은 1 이상의 정수로 입력해주세요.'; return; }
+    if (qty === s.allocated_qty) { errorEl.textContent = '지금 배분량과 같습니다.'; return; }
+    if (s.allocated_qty - qty > s.remaining_qty) { errorEl.textContent = `현장 잔량(${s.remaining_qty})보다 많이 줄일 수 없습니다.`; return; }
+
+    isBusy = true;
+    try {
+        await apiFetch(`/manage/mission-stocks/${s.id}/`, { method: 'PATCH', body: JSON.stringify({ allocated_qty: qty }) });
+    } catch (err) {
+        errorEl.textContent = err.message;
+        return;
+    } finally {
+        isBusy = false;
+    }
+    closeModal();
+    showToast(`배분량을 ${s.allocated_qty} → ${qty}(으)로 바꿨습니다.`);
+    reloadMissionStocks();
+}
+
+// ----- 정산 (한 줄) -----
+
+function openSettleModal(s) {
+    openModal({
+        title: '정산',
+        bodyHtml: `
+            <p class="modal-note">${escapeHtml(msLabel(s))}</p>
+            ${activeMissionWarning()}
+            <p class="adjust-current">현장 잔량 <strong>${s.remaining_qty}</strong></p>
+            <label class="field-label" for="st-donated">현지에 기부한 양</label>
+            <input class="field-input" type="number" id="st-donated" min="0" inputmode="numeric" value="0">
+            <p class="modal-note" id="st-return">창고로 돌아갈 양 ${s.remaining_qty}</p>
+            <p class="error-message" id="st-error"></p>`,
+        confirmLabel: '정산하기',
+        onConfirm: () => { saveSettle(s); return false; },
+    });
+    byId('st-donated').addEventListener('input', () => {
+        const donated = readCount('st-donated');
+        byId('st-return').textContent = Number.isNaN(donated) ? '' : `창고로 돌아갈 양 ${s.remaining_qty - donated}`;
+    });
+    byId('st-donated').select();
+}
+
+async function saveSettle(s) {
+    if (isBusy) return;
+    const errorEl = byId('st-error');
+    const donated = readCount('st-donated');
+    if (Number.isNaN(donated)) { errorEl.textContent = '기부량은 0 이상의 정수로 입력해주세요.'; return; }
+    if (donated > s.remaining_qty) { errorEl.textContent = `현장 잔량(${s.remaining_qty})보다 많이 기부할 수 없습니다.`; return; }
+
+    isBusy = true;
+    let result;
+    try {
+        result = await apiFetch(`/manage/mission-stocks/${s.id}/settle/`, {
+            method: 'POST', body: JSON.stringify({ donated_qty: donated }),
+        });
+    } catch (err) {
+        errorEl.textContent = err.message;
+        return;
+    } finally {
+        isBusy = false;
+    }
+    closeModal();
+    showToast(`정산했습니다. 창고로 ${result.returned_qty} 돌려줬습니다.`);
+    reloadMissionStocks();
+}
+
+// ----- 한꺼번에 정산 -----
+
+function openBulkSettleModal() {
+    const open = msList.filter((s) => !s.is_settled);
+    if (open.length === 0) return;
+    openModal({
+        title: '한꺼번에 정산',
+        bodyHtml: `
+            <p class="modal-note">정산 전인 배치 ${open.length}개입니다. 현지에 기부한 양만 적으세요 (비워 두면 0).
+                나머지는 창고로 돌아갑니다. 하나라도 틀리면 아무것도 정산되지 않아요.</p>
+            ${activeMissionWarning()}
+            <div class="table-scroll">
+                <table class="stats-table bulk-settle-table">
+                    <thead><tr><th>약</th><th>유통기한</th><th class="stats-qty">현장 잔량</th><th class="stats-qty">기부량</th></tr></thead>
+                    <tbody>${open.map((s) => `
+                        <tr>
+                            <td>${escapeHtml(s.drug_name)}</td>
+                            <td>${escapeHtml(s.expiry_date)}</td>
+                            <td class="stats-qty">${s.remaining_qty}</td>
+                            <td class="stats-qty"><input class="field-input bulk-donated" type="number" min="0" max="${s.remaining_qty}"
+                                inputmode="numeric" placeholder="0" data-id="${s.id}"${s.remaining_qty === 0 ? ' disabled' : ''}
+                                aria-label="${escapeHtml(s.drug_name)} 기부량"></td>
+                        </tr>`).join('')}
+                    </tbody>
+                </table>
+            </div>
+            <p class="error-message" id="bs-error"></p>`,
+        confirmLabel: `정산하기 (${open.length}개)`,
+        onConfirm: () => { saveBulkSettle(open); return false; },
+        wide: true,
+    });
+}
+
+async function saveBulkSettle(open) {
+    if (isBusy) return;
+    const errorEl = byId('bs-error');
+    const items = [];
+    for (const input of document.querySelectorAll('.bulk-donated')) {
+        const s = open.find((x) => x.id === Number(input.dataset.id));
+        const raw = input.value.trim();
+        const donated = raw === '' ? 0 : Number(raw);
+        if (!Number.isInteger(donated) || donated < 0 || donated > s.remaining_qty) {
+            errorEl.textContent = `${s.drug_name}: 기부량은 0 ~ ${s.remaining_qty} 사이의 정수로 입력해주세요.`;
+            input.focus();
+            return;
+        }
+        items.push({ id: s.id, donated_qty: donated });
+    }
+
+    isBusy = true;
+    let result;
+    try {
+        result = await apiFetch('/manage/mission-stocks/settle-bulk/', { method: 'POST', body: JSON.stringify({ items }) });
+    } catch (err) {
+        errorEl.textContent = err.message;
+        return;
+    } finally {
+        isBusy = false;
+    }
+    closeModal();
+    showToast(`${result.settled}개를 정산했습니다. 창고로 ${result.returned_qty} 돌려줬습니다.`);
+    reloadMissionStocks();
+}
+
+// ----- 줄 버튼 -----
+
+byId('ms-list').addEventListener('click', (e) => {
+    const row = e.target.closest('.admin-row');
+    const action = e.target.dataset.action;
+    if (!row || !action) return;
+    const s = msList.find((x) => x.id === Number(row.dataset.id));
+    if (!s) return;
+    if (action === 'allocate') openAllocationEditModal(s);
+    if (action === 'adjust') {
+        openAdjustModal({
+            title: '현장 잔량 보정', name: msLabel(s), current: s.remaining_qty,
+            path: `/manage/mission-stocks/${s.id}/adjust/`, onDone: reloadMissionStocks,
+        });
+    }
+    if (action === 'settle') openSettleModal(s);
+    if (action === 'history') openHistoryModal(msLabel(s), `mission_stock=${s.id}`);
+    if (action === 'delete') {
+        confirmDelete({
+            title: '배분 삭제', name: msLabel(s), path: `/manage/mission-stocks/${s.id}/`, onDone: reloadMissionStocks,
+        });
+    }
+});
+
+byId('ms-add-btn').addEventListener('click', openAllocateModal);
+byId('ms-settle-bulk-btn').addEventListener('click', openBulkSettleModal);
+byId('ms-search').addEventListener('input', renderMissionStocks);
+byId('ms-filter-status').addEventListener('change', renderMissionStocks);
+byId('ms-filter-cat1').addEventListener('change', renderMissionStocks);
+
+TAB_LOADERS['mission-stock'] = loadMissionStocks;
 
 
 // =====================================================

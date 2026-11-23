@@ -342,3 +342,11 @@
 .modal-body .adjust-current strong {
     color: var(--color-text);
 }
+
+/* 한꺼번에 정산 표의 기부량 칸 */
+.bulk-settle-table .field-input {
+    width: 88px;
+    margin: 0;
+    padding: 8px 10px;
+    text-align: right;
+}
