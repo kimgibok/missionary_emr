@@ -132,7 +132,7 @@ dispensePanel.addEventListener('focusout', () => {
 });
 
 async function loadQueue() {
-    const data = await apiFetch('/visits/pharmacy-queue/?page_size=200');
+    const data = await apiFetch('/visits/pharmacy-queue/?page_size=500');
     const signature = JSON.stringify(data);
     if (signature === queueSignature) return;
     queueSignature = signature;
@@ -753,7 +753,7 @@ function placeDonePanel() {
 }
 
 async function loadDone() {
-    const data = await apiFetch('/visits/pharmacy-done/?page_size=200');   // 서버가 수령 시각 최신순으로 정렬
+    const data = await apiFetch('/visits/pharmacy-done/?page_size=500');   // 서버가 수령 시각 최신순으로 정렬
     const signature = JSON.stringify(data);
     if (signature === doneSignature) return;
     doneSignature = signature;
