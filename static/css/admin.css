@@ -253,37 +253,127 @@
     margin: 4px 0 8px;
 }
 
-/* ---------- 창고·미션 재고 줄의 수량 칸 ---------- */
-.admin-row-qty {
-    min-width: 96px;
-    text-align: right;
+/* ---------- 창고·미션 재고 표 (분류 칩 + 세부 분류 머리줄) ---------- */
+.cat-chips {
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    padding: 2px 2px 8px;
+    margin-bottom: 6px;
+    scrollbar-width: thin;
 }
 
-.admin-row-qty-main {
-    display: block;
-    font-size: 17px;
-    font-weight: 700;
+.cat-chip {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 44px;
+    padding: 0 14px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--color-text);
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.cat-chip.active {
+    background: var(--color-accent);
+    border-color: var(--color-accent);
+    color: var(--color-surface);
+}
+
+.cat-chip-count {
+    font-size: 12px;
     font-variant-numeric: tabular-nums;
+    opacity: 0.7;
 }
 
-.admin-row-qty-main small {
+.stock-table td {
+    vertical-align: middle;
+}
+
+/* 세부 분류 머리줄 - "구충제 2" */
+.stock-table .stock-group-row th {
+    padding: 14px 4px 6px;
     font-size: 13px;
+    font-weight: 600;
+    color: var(--color-accent);
+    border-bottom: 1px solid var(--color-border);
+}
+
+.stock-group-count {
+    margin-left: 4px;
     font-weight: 500;
     color: var(--color-text-muted);
 }
 
-.admin-row-qty-label {
-    display: block;
-    font-size: 11px;
+.stock-table .stock-name {
+    font-weight: 600;
+}
+
+.stock-table .stock-muted {
+    color: var(--color-text-muted);
+    font-weight: 500;
+}
+
+.stock-table .stock-qty {
+    width: 110px;
+    font-size: 15px;
+}
+
+.stock-table .stats-qty small {
+    font-size: 12px;
+    font-weight: 500;
     color: var(--color-text-muted);
 }
 
-.admin-row.is-empty .admin-row-qty-main {
+.stock-table tr.is-empty .stock-qty {
     color: var(--color-danger);
 }
 
-.admin-row.is-settled {
-    opacity: 0.65;
+.stock-table tr.is-settled td {
+    opacity: 0.6;
+}
+
+/* 버튼 칸 - 오른쪽 정렬, 버튼끼리 붙여서 */
+.stock-table .stock-actions {
+    text-align: right;
+}
+
+.stock-actions > * {
+    vertical-align: middle;
+}
+
+.stock-actions .btn-small + .btn-small {
+    margin-left: 4px;
+}
+
+/* 유통기한 표시 - 임시 날짜는 '미확인', 지났으면 '지남' */
+.expiry-tag {
+    display: inline-block;
+    padding: 1px 7px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.expiry-tag.is-unknown {
+    background: var(--color-bg);
+    border: 1px dashed var(--color-text-muted);
+    color: var(--color-text-muted);
+}
+
+.expiry-tag.is-past {
+    background: var(--color-danger);
+    color: var(--color-surface);
+}
+
+/* 미션 재고는 거르는 칸이 둘(검색·정산 상태) */
+.admin-filters.is-two {
+    grid-template-columns: 2fr 1fr;
 }
 
 /* 줄 안의 글자 버튼 (이력 등) - 터치 영역 44px */

@@ -77,12 +77,14 @@ class DrugBatchSerializer(serializers.ModelSerializer):
     입고량을 고치면 잔량도 같은 만큼 같이 바뀐다.
     """
     drug_name = serializers.CharField(source='drug.name', read_only=True)
+    cat1_name = serializers.CharField(source='drug.cat1.name', read_only=True)     # 화면의 분류 칩·묶음용
+    cat2_name = serializers.CharField(source='drug.cat2.name', read_only=True)
     source_display = serializers.CharField(source='get_source_display', read_only=True)
 
     class Meta:
         model = DrugBatch
         fields = [
-            'id', 'drug', 'drug_name', 'source', 'source_display', 'source_detail', 'received_date', 'expiry_date',
+            'id', 'drug', 'drug_name', 'cat1_name', 'cat2_name', 'source', 'source_display', 'source_detail', 'received_date', 'expiry_date',
             'unit_qty', 'unit_label', 'total_qty', 'remaining_qty',
         ]
         read_only_fields = ['remaining_qty']
@@ -127,6 +129,7 @@ class MissionStockSerializer(serializers.ModelSerializer):
     drug_name = serializers.CharField(source='drugbatch.drug.name', read_only=True)
     ingredient = serializers.CharField(source='drugbatch.drug.ingredient', read_only=True)
     cat1_name = serializers.CharField(source='drugbatch.drug.cat1.name', read_only=True)
+    cat2_name = serializers.CharField(source='drugbatch.drug.cat2.name', read_only=True)
     expiry_date = serializers.DateField(source='drugbatch.expiry_date', read_only=True)
     source_display = serializers.CharField(source='drugbatch.get_source_display', read_only=True)
     used_qty = serializers.IntegerField(read_only=True, default=0)
@@ -135,7 +138,7 @@ class MissionStockSerializer(serializers.ModelSerializer):
     class Meta:
         model = MissionStock
         fields = [
-            'id', 'drugbatch', 'mission', 'drug_id', 'drug_name', 'ingredient', 'cat1_name', 'expiry_date', 'source_display',
+            'id', 'drugbatch', 'mission', 'drug_id', 'drug_name', 'ingredient', 'cat1_name', 'cat2_name', 'expiry_date', 'source_display',
             'allocated_qty', 'remaining_qty', 'donated_qty', 'is_settled', 'used_qty', 'consumption_rate',
         ]
         read_only_fields = ['remaining_qty', 'donated_qty', 'is_settled']

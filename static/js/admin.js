@@ -655,6 +655,86 @@ async function openHistoryModal(name, query) {
 
 
 // =====================================================
+// 공용 - 재고 표 (창고 재고·미션 재고): 위에 분류 칩, 아래에 세부 분류로 나눈 표
+// =====================================================
+
+const PLACEHOLDER_EXPIRY = '2099-12-31';    // import_drugs가 유통기한 없는 약에 넣는 임시 날짜
+const BATCH_CAT_KEY = 'admin_batch_cat';    // 창고 재고에서 고른 분류 칩 (localStorage)
+const MS_CAT_KEY = 'admin_ms_cat';          // 미션 재고에서 고른 분류 칩 (localStorage)
+
+function loadSaved(key) {
+    return localStorage.getItem(key) || '';
+}
+
+// 칩 묶음 이름 - '약속처방 - OS'처럼 ' - '가 있으면 앞부분('약속처방')으로 묶는다
+function catGroup(cat1Name) {
+    return cat1Name.split(' - ')[0].trim();
+}
+
+function compareKo(a, b) {
+    return String(a).localeCompare(String(b), 'ko');
+}
+
+// [전체 86] [경구 58] [외용 13] ... - rows는 다른 필터(검색·출처 등)를 거친 줄, 숫자도 그 기준
+function catChipsHtml(rows, selected) {
+    const counts = new Map();
+    rows.forEach((r) => {
+        const group = catGroup(r.cat1_name);
+        counts.set(group, (counts.get(group) || 0) + 1);
+    });
+    // 고른 분류가 필터에 걸려 0개여도 칩은 남겨 둔다 (어디를 보고 있는지 알 수 있게)
+    if (selected && !counts.has(selected)) counts.set(selected, 0);
+    const chip = (value, label, count) => `
+        <button type="button" class="cat-chip${value === selected ? ' active' : ''}" data-cat="${escapeHtml(value)}"
+                aria-pressed="${value === selected}">
+            ${escapeHtml(label)}<span class="cat-chip-count">${count}</span>
+        </button>`;
+    return chip('', '전체', rows.length)
+        + [...counts].sort((a, b) => compareKo(a[0], b[0])).map(([group, count]) => chip(group, group, count)).join('');
+}
+
+// 유통기한 칸 - 임시 날짜는 '미확인', 지났으면 '지남' 표시 (기기 날짜 기준)
+function expiryCellHtml(date) {
+    if (date === PLACEHOLDER_EXPIRY) {
+        return '<span class="expiry-tag is-unknown" title="임시 날짜 2099-12-31 - [수정]으로 실제 날짜를 넣으세요">미확인</span>';
+    }
+    const expired = date < todayStr() ? ' <span class="expiry-tag is-past">지남</span>' : '';
+    return `<span class="nowrap">${escapeHtml(date)}</span>${expired}`;
+}
+
+// 세부 분류(전체 칩이면 '분류 › 세부 분류') 머리줄을 끼운 표. 같은 묶음 안은 약품명 → 유통기한 순
+function stockTableHtml({ head, columns, rows, showCat1, rowHtml }) {
+    const groupOf = (r) => (showCat1 ? `${r.cat1_name} › ${r.cat2_name}` : r.cat2_name);
+    const sorted = [...rows].sort((a, b) => compareKo(a.cat1_name, b.cat1_name)
+        || compareKo(a.cat2_name, b.cat2_name)
+        || compareKo(a.drug_name, b.drug_name)
+        || compareKo(a.expiry_date, b.expiry_date)
+        || a.id - b.id);
+    const counts = new Map();
+    sorted.forEach((r) => counts.set(groupOf(r), (counts.get(groupOf(r)) || 0) + 1));
+
+    let body = '';
+    let current = null;
+    sorted.forEach((r) => {
+        const group = groupOf(r);
+        if (group !== current) {
+            current = group;
+            body += `<tr class="stock-group-row"><th colspan="${columns}" scope="colgroup">
+                         ${escapeHtml(group)} <span class="stock-group-count">${counts.get(group)}</span></th></tr>`;
+        }
+        body += rowHtml(r);
+    });
+    return `
+        <div class="table-scroll">
+            <table class="stats-table stock-table">
+                <thead><tr>${head}</tr></thead>
+                <tbody>${body}</tbody>
+            </table>
+        </div>`;
+}
+
+
+// =====================================================
 // 5. 창고 재고 탭 - 입고 배치 (미션과 상관없는 창고 전체)
 // =====================================================
 
@@ -662,55 +742,52 @@ const SOURCE_OPTIONS = [
     ['donation', '후원'], ['local', '현지'], ['purchase', '구매'], ['local_purchase', '현지구매'], ['etc', '기타'],
 ];
 
-let batchList = [];             // 지금 검색어의 창고 배치 (출처·잔량 필터는 화면에서)
+let batchList = [];             // 지금 검색어의 창고 배치 (출처·잔량·분류 필터는 화면에서)
 let allDrugs = [];              // 입고 모달의 약품 선택지 (분류별로 묶음)
 let batchRequestSeq = 0;
 let batchSearchTimer = null;
+let batchCat = loadSaved(BATCH_CAT_KEY);    // 고른 분류 칩 ('' = 전체)
 
-// 여러 항목을 " · "로 잇되, 폰에서 항목 중간("단위 1 / 병")이 끊기지 않게 항목마다 묶는다 (escape된 HTML)
-function joinParts(parts) {
-    return parts.filter(Boolean).map((p) => `<span class="nowrap">${escapeHtml(p)}</span>`).join(' · ');
-}
-
-// "유통기한 2027-01-01 (지남) · 후원 (교회 후원) · 입고 2026-08-01 · 단위 100정"
-function batchSubHtml(b) {
-    const expired = b.expiry_date < todayStr() ? ' (지남)' : '';
-    const source = b.source_detail ? `${b.source_display} (${b.source_detail})` : b.source_display;
-    return joinParts([`유통기한 ${b.expiry_date}${expired}`, source, `입고 ${b.received_date}`, `단위 ${b.unit_qty}${b.unit_label}`]);
-}
-
+// 창고 배치 한 줄 - 약품명 | 유통기한 | 출처 | 포장 | 창고 잔량 / 입고량 | 버튼
 function batchRowHtml(b) {
+    const source = b.source_detail ? `${b.source_display} (${b.source_detail})` : b.source_display;
     return `
-        <div class="admin-row${b.remaining_qty === 0 ? ' is-empty' : ''}" data-id="${b.id}">
-            <span class="admin-row-main">
-                <span class="admin-row-title">${escapeHtml(b.drug_name)}</span>
-                <span class="admin-row-sub">${batchSubHtml(b)}</span>
-            </span>
-            <span class="admin-row-qty">
-                <span class="admin-row-qty-main">${b.remaining_qty} <small>/ ${b.total_qty}</small></span>
-                <span class="admin-row-qty-label">창고 잔량 / 입고량</span>
-            </span>
-            <span class="admin-row-actions">
+        <tr data-id="${b.id}"${b.remaining_qty === 0 ? ' class="is-empty"' : ''}>
+            <td class="stock-name">${escapeHtml(b.drug_name)}</td>
+            <td>${expiryCellHtml(b.expiry_date)}</td>
+            <td>${escapeHtml(source)}</td>
+            <td class="stock-muted">${b.unit_qty}${escapeHtml(b.unit_label)}</td>
+            <td class="stats-qty stock-qty">${b.remaining_qty} <small>/ ${b.total_qty}</small></td>
+            <td class="stock-actions">
                 <button type="button" class="btn-secondary btn-small" data-action="edit">수정</button>
                 <button type="button" class="btn-secondary btn-small" data-action="adjust">잔량 보정</button>
                 <button type="button" class="row-link" data-action="history">이력</button>
                 <button type="button" class="row-delete" data-action="delete">삭제</button>
-            </span>
-        </div>`;
+            </td>
+        </tr>`;
 }
 
 function renderBatches() {
     const source = byId('batch-filter-source').value;
     const stock = byId('batch-filter-stock').value;
-    const rows = batchList.filter((b) => (!source || b.source === source)
+    const filtered = batchList.filter((b) => (!source || b.source === source)
         && (stock !== 'left' || b.remaining_qty > 0)
         && (stock !== 'empty' || b.remaining_qty === 0));
+    const rows = filtered.filter((b) => !batchCat || catGroup(b.cat1_name) === batchCat);
+
+    byId('batch-cats').innerHTML = catChipsHtml(filtered, batchCat);
     byId('batch-count').textContent = `${rows.length}개`;
     byId('batch-list').innerHTML = rows.length === 0
         ? emptyRowHtml(batchList.length === 0 && !byId('batch-search').value.trim()
             ? '입고한 배치가 없습니다. [입고 추가]로 등록하세요.'
             : '조건에 맞는 배치가 없습니다.')
-        : rows.map(batchRowHtml).join('');
+        : stockTableHtml({
+            head: '<th>약품명</th><th>유통기한</th><th>출처</th><th>포장</th><th class="stats-qty">창고 / 입고</th><th></th>',
+            columns: 6,
+            rows,
+            showCat1: !batchCat,
+            rowHtml: batchRowHtml,
+        });
 }
 
 async function loadBatches() {
@@ -842,8 +919,16 @@ async function saveBatch(batch) {
     loadBatches();
 }
 
+byId('batch-cats').addEventListener('click', (e) => {
+    const chip = e.target.closest('.cat-chip');
+    if (!chip) return;
+    batchCat = chip.dataset.cat;
+    localStorage.setItem(BATCH_CAT_KEY, batchCat);
+    renderBatches();
+});
+
 byId('batch-list').addEventListener('click', (e) => {
-    const row = e.target.closest('.admin-row');
+    const row = e.target.closest('tr[data-id]');
     const action = e.target.dataset.action;
     if (!row || !action) return;
     const b = batchList.find((x) => x.id === Number(row.dataset.id));
@@ -879,6 +964,7 @@ TAB_LOADERS.warehouse = loadBatches;
 
 let msList = [];                // 고른 미션의 미션 재고 (서버 응답 그대로)
 let msRequestSeq = 0;
+let msCat = loadSaved(MS_CAT_KEY);  // 고른 분류 칩 ('' = 전체)
 
 // 0 이상의 정수 입력값 (비었거나 이상하면 NaN)
 function readCount(id) {
@@ -898,54 +984,54 @@ function activeMissionWarning() {
         : '';
 }
 
+// 미션 재고 한 줄 - 약품명 | 유통기한 | 출처 | 사용 | 현장 잔량 / 배분량 | 버튼 (정산했으면 정산 내용 + [이력])
 function msRowHtml(s) {
-    const expired = s.expiry_date < todayStr() ? ' (지남)' : '';
-    const usedTag = `<span class="doctor-tag waiting">사용 ${s.used_qty} (${Math.round(s.consumption_rate * 100)}%)</span>`;
-    const settledTag = s.is_settled
-        ? `<span class="doctor-tag">정산 완료 · 기부 ${s.donated_qty} · 반환 ${s.remaining_qty - s.donated_qty}</span>`
-        : '';
     const actions = s.is_settled
-        ? '<button type="button" class="row-link" data-action="history">이력</button>'
+        ? `<span class="doctor-tag">정산 · 기부 ${s.donated_qty} · 반환 ${s.remaining_qty - s.donated_qty}</span>
+           <button type="button" class="row-link" data-action="history">이력</button>`
         : `<button type="button" class="btn-secondary btn-small" data-action="allocate">배분량 수정</button>
            <button type="button" class="btn-secondary btn-small" data-action="adjust">잔량 보정</button>
            <button type="button" class="btn-secondary btn-small" data-action="settle">정산</button>
            <button type="button" class="row-link" data-action="history">이력</button>
            <button type="button" class="row-delete" data-action="delete">삭제</button>`;
-    const state = s.is_settled ? ' is-settled' : (s.remaining_qty === 0 ? ' is-empty' : '');
+    const state = s.is_settled ? ' class="is-settled"' : (s.remaining_qty === 0 ? ' class="is-empty"' : '');
     return `
-        <div class="admin-row${state}" data-id="${s.id}">
-            <span class="admin-row-main">
-                <span class="admin-row-title">${escapeHtml(s.drug_name)}</span>
-                <span class="admin-row-sub">${joinParts([`유통기한 ${s.expiry_date}${expired}`, s.source_display, s.cat1_name])}</span>
-            </span>
-            <span class="admin-row-tags">${usedTag}${settledTag}</span>
-            <span class="admin-row-qty">
-                <span class="admin-row-qty-main">${s.remaining_qty} <small>/ ${s.allocated_qty}</small></span>
-                <span class="admin-row-qty-label">현장 잔량 / 배분량</span>
-            </span>
-            <span class="admin-row-actions">${actions}</span>
-        </div>`;
+        <tr data-id="${s.id}"${state}>
+            <td class="stock-name">${escapeHtml(s.drug_name)}</td>
+            <td>${expiryCellHtml(s.expiry_date)}</td>
+            <td>${escapeHtml(s.source_display)}</td>
+            <td class="stats-qty stock-muted">${s.used_qty} <small>(${Math.round(s.consumption_rate * 100)}%)</small></td>
+            <td class="stats-qty stock-qty">${s.remaining_qty} <small>/ ${s.allocated_qty}</small></td>
+            <td class="stock-actions">${actions}</td>
+        </tr>`;
 }
 
 function renderMissionStocks() {
     const keyword = byId('ms-search').value.trim().toLowerCase();
     const status = byId('ms-filter-status').value;
-    const cat1 = byId('ms-filter-cat1').value;
-    const rows = msList.filter((s) => (!keyword
+    const filtered = msList.filter((s) => (!keyword
             || s.drug_name.toLowerCase().includes(keyword)
             || (s.ingredient || '').toLowerCase().includes(keyword))
-        && (!status || (status === 'settled') === s.is_settled)
-        && (!cat1 || s.cat1_name === cat1));
+        && (!status || (status === 'settled') === s.is_settled));
+    const rows = filtered.filter((s) => !msCat || catGroup(s.cat1_name) === msCat);
 
     const open = msList.filter((s) => !s.is_settled).length;
     byId('ms-summary').textContent =
         `배치 ${msList.length}개 · 정산 전 ${open}개 · 정산 완료 ${msList.length - open}개`;
     byId('ms-settle-bulk-btn').disabled = open === 0;
+    byId('ms-cats').innerHTML = msList.length === 0 ? '' : catChipsHtml(filtered, msCat);
     byId('ms-list').innerHTML = rows.length === 0
         ? emptyRowHtml(msList.length === 0
             ? '이 미션에 배분된 재고가 없습니다. [배분 추가]로 창고에서 챙겨 갈 배치를 고르세요.'
             : '조건에 맞는 재고가 없습니다.')
-        : rows.map(msRowHtml).join('');
+        : stockTableHtml({
+            head: '<th>약품명</th><th>유통기한</th><th>출처</th><th class="stats-qty">사용</th>'
+                + '<th class="stats-qty">현장 / 배분</th><th></th>',
+            columns: 6,
+            rows,
+            showCat1: !msCat,
+            rowHtml: msRowHtml,
+        });
 }
 
 async function loadMissionStocks(mission) {
@@ -954,11 +1040,6 @@ async function loadMissionStocks(mission) {
         const data = await apiFetch(`/manage/mission-stocks/?mission=${mission.id}&page_size=500`);
         if (seq !== msRequestSeq) return;
         msList = data.results;
-        // 분류 필터 선택지 = 이 미션 재고에 있는 분류 (고른 값은 유지)
-        const cats = [...new Set(msList.map((s) => s.cat1_name))].sort();
-        const selected = byId('ms-filter-cat1').value;
-        byId('ms-filter-cat1').innerHTML = '<option value="">분류 전체</option>' + cats.map((c) =>
-            `<option value="${escapeHtml(c)}"${c === selected ? ' selected' : ''}>${escapeHtml(c)}</option>`).join('');
         renderMissionStocks();
     } catch (err) {
         if (seq !== msRequestSeq) return;
@@ -1194,8 +1275,16 @@ async function saveBulkSettle(open) {
 
 // ----- 줄 버튼 -----
 
+byId('ms-cats').addEventListener('click', (e) => {
+    const chip = e.target.closest('.cat-chip');
+    if (!chip) return;
+    msCat = chip.dataset.cat;
+    localStorage.setItem(MS_CAT_KEY, msCat);
+    renderMissionStocks();
+});
+
 byId('ms-list').addEventListener('click', (e) => {
-    const row = e.target.closest('.admin-row');
+    const row = e.target.closest('tr[data-id]');
     const action = e.target.dataset.action;
     if (!row || !action) return;
     const s = msList.find((x) => x.id === Number(row.dataset.id));
@@ -1220,7 +1309,6 @@ byId('ms-add-btn').addEventListener('click', openAllocateModal);
 byId('ms-settle-bulk-btn').addEventListener('click', openBulkSettleModal);
 byId('ms-search').addEventListener('input', renderMissionStocks);
 byId('ms-filter-status').addEventListener('change', renderMissionStocks);
-byId('ms-filter-cat1').addEventListener('change', renderMissionStocks);
 
 TAB_LOADERS['mission-stock'] = loadMissionStocks;
 
