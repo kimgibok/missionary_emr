@@ -14,6 +14,12 @@
             <h1 class="login-title">의료선교 EMR</h1>
             <p class="login-subtitle">계정 정보를 입력해주세요</p>
 
+            <div class="login-expired" id="login-expired" role="alert" hidden>
+                <strong>로그인이 만료되었습니다</strong>
+                <span>로그인은 8시간 동안 유지됩니다. 다시 로그인해 주세요.
+                    약국 출력 PC라면 다시 로그인해야 조제지 자동 출력이 이어집니다(자동 출력·용지 설정은 그대로 남아 있어요).</span>
+            </div>
+
             <form id="login-form">
                 <label class="field-label" for="username">아이디</label>
                 <input class="field-input" type="text" id="username" autocomplete="username" required>

@@ -7,6 +7,7 @@ from rest_framework.views import APIView
 
 from clinic.models import MissionMembership
 
+from .authentication import TOKEN_EXPIRE_HOURS
 from .serializers import LoginSerializer
 
 
@@ -49,6 +50,7 @@ class LoginView(APIView):
             'name': user.name,
             'is_superuser': user.is_superuser,
             'current_missions': current_missions,
+            'expires_in': TOKEN_EXPIRE_HOURS * 3600,    # 토큰 유효 시간(초) - 화면이 만료 전에 미리 알려주는 데 쓴다
         })
 
 

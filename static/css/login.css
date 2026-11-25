@@ -54,3 +54,21 @@
     color: var(--color-text-muted);
     margin-top: 2px;
 }
+/* 토큰 만료로 로그인 화면에 왔을 때 - 출력 PC처럼 지켜보는 사람이 없는 기기에서도 눈에 띄게 */
+.login-expired {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: -12px 0 24px;
+    padding: 14px 16px;
+    border: 1px solid var(--color-danger);
+    border-radius: 12px;
+    background: var(--color-surface);
+    color: var(--color-danger);
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.login-expired strong {
+    font-size: 17px;
+}

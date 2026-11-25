@@ -21,6 +21,7 @@ const AUTOPRINT_KEY = 'pharmacy_autoprint';  // 이 기기에서 자동 출력�
 const PAPER_KEY = 'pharmacy_paper';          // 이 기기의 조제지 용지 'receipt' | 'a4' (localStorage)
 const TAB_KEY = 'pharmacy_tab';              // 마지막으로 본 탭 (localStorage)
 const LOW_STOCK_RATIO = 0.2;                 // 챙겨 온 양의 20% 이하로 남으면 '부족' 표시
+const TOKEN_WARN_MINUTES = 30;               // 자동 출력 PC에서 로그인 만료를 미리 알리는 시점 (분)
 // 용지별 @page. 영수증은 크기를 정하지 않아(auto) 프린터 드라이버의 기본 용지(80mm·58mm 감열지)를 따른다.
 const PAGE_STYLES = {
     receipt: '@page { size: auto; margin: 0; }',
@@ -662,11 +663,20 @@ function updateAutoPrintStatus() {
     }
     el.hidden = false;
     const ready = soundReady();
-    el.classList.toggle('is-warning', !ready);
-    el.textContent = ready
-        ? '이 기기에서 조제지를 자동 출력합니다. 재고 문제가 있으면 소리와 안내창으로 알려요.'
-        : '자동 출력 중 · 경고음을 켜려면 화면을 아무 곳이나 한 번 눌러주세요.';
+    const minutesLeft = tokenMinutesLeft();
+    const expiringSoon = minutesLeft !== null && minutesLeft <= TOKEN_WARN_MINUTES;
+    el.classList.toggle('is-warning', !ready || expiringSoon);
+    if (expiringSoon) {
+        // 만료되면 이 기기는 로그인 화면으로 넘어가 자동 출력이 멈춘다 - 한가할 때 미리 다시 로그인하게
+        el.textContent = `로그인 만료 ${Math.max(minutesLeft, 0)}분 전 · 만료되면 자동 출력이 멈춥니다. 손이 빌 때 로그아웃 후 다시 로그인하세요.`;
+    } else {
+        el.textContent = ready
+            ? '이 기기에서 조제지를 자동 출력합니다. 재고 문제가 있으면 소리와 안내창으로 알려요.'
+            : '자동 출력 중 · 경고음을 켜려면 화면을 아무 곳이나 한 번 눌러주세요.';
+    }
 }
+
+setInterval(updateAutoPrintStatus, 60000);  // 만료까지 남은 분을 1분마다 고친다
 
 byId('autoprint-toggle').addEventListener('change', () => {
     if (isAutoPrintOn()) {

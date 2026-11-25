@@ -15,7 +15,7 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
 
     errorEl.textContent = '';
     submitBtn.disabled = true;
-    clearToken();   // 이 줄 추가 — 로그인 시도 전에 기존 토큰 제거
+    clearToken();   // 로그인 시도 전에 기존 토큰 제거
 
     try {
         const data = await apiFetch('/auth/login/', {
@@ -24,8 +24,14 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
         });
 
         setToken(data.token);
+        localStorage.setItem('token_expires_at', String(Date.now() + data.expires_in * 1000));
         localStorage.setItem('user_name', data.name);
         localStorage.setItem('is_superuser', data.is_superuser);
+        try {
+            sessionStorage.removeItem(AUTH_EXPIRED_KEY);
+        } catch {
+            // 무시
+        }
 
         routeAfterLogin(data);
     } catch (err) {
@@ -51,4 +57,11 @@ function routeAfterLogin(data) {
         localStorage.setItem('missions_to_select', JSON.stringify(missions));
         window.location.href = '/select-mission/';
     }
+}
+
+// 토큰 만료로 왔으면 크게 알린다 (api.js의 goLoginExpired가 표시를 남긴다)
+try {
+    document.getElementById('login-expired').hidden = sessionStorage.getItem(AUTH_EXPIRED_KEY) !== '1';
+} catch {
+    // 저장이 막힌 브라우저면 안내 없이 로그인 화면만
 }
