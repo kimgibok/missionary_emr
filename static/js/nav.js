@@ -26,8 +26,7 @@ function renderNav() {
 
 function logout() {
     apiFetch('/auth/logout/', { method: 'POST' }).finally(() => {
-        clearToken();
-        localStorage.clear();
+        clearAuth();    // 로그인 키만 지운다 (기기 설정은 남긴다)
         window.location.href = '/';
     });
 }

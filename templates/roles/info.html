@@ -8,8 +8,9 @@
     <link rel="stylesheet" href="{% static_v 'css/base.css' %}">
     <link rel="stylesheet" href="{% static_v 'css/nav.css' %}">
     <link rel="stylesheet" href="{% static_v 'css/page.css' %}">
-    <link rel="stylesheet" href="{% static_v 'css/info.css' %}">
     <link rel="stylesheet" href="{% static_v 'css/modal.css' %}">
+    <link rel="stylesheet" href="{% static_v 'css/reception.css' %}">
+    <link rel="stylesheet" href="{% static_v 'css/info.css' %}">
 </head>
 <body>
     {% include 'partials/nav.html' %}
@@ -63,7 +64,9 @@
         <div id="ticket-result"></div>
     </main>
     {% include 'partials/modal.html' %}
+    <div class="toast" id="toast" role="status"></div>
     <script src="{% static_v 'js/api.js' %}"></script>
+    <script src="{% static_v 'js/common.js' %}"></script>
     <script src="{% static_v 'js/patient-intake.js' %}"></script>
     <script src="{% static_v 'js/nav.js' %}"></script>
     <script src="{% static_v 'js/modal.js' %}"></script>

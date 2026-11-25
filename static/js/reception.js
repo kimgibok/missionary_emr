@@ -111,8 +111,8 @@ intakeCard.addEventListener('focusout', () => {
 // ----- 서버에서 불러오기 -----
 async function loadLists() {
     const [waiting, done] = await Promise.all([
-        apiFetch('/visits/?status=waiting_vitals&page_size=200'),
-        apiFetch('/visits/?status=intake_done&page_size=200'),
+        apiFetch('/visits/?status=waiting_vitals&page_size=500'),
+        apiFetch('/visits/?status=intake_done&page_size=500'),
     ]);
 
     const signature = JSON.stringify([waiting, done]);

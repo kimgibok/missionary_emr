@@ -12,6 +12,32 @@ function clearToken() {
     localStorage.removeItem('token');
 }
 
+// 로그인할 때 저장하는 키 - 로그아웃·만료 때는 이것만 지운다.
+// localStorage.clear()를 쓰면 약국 출력 PC의 [자동 출력]·용지 같은 기기 설정까지 지워진다.
+const AUTH_KEYS = ['token', 'token_expires_at', 'user_name', 'is_superuser', 'current_mission_id', 'missions_to_select'];
+const AUTH_EXPIRED_KEY = 'auth_expired';    // 만료로 로그인 화면에 왔는지 (sessionStorage, 로그인 화면이 크게 알린다)
+
+function clearAuth() {
+    AUTH_KEYS.forEach((key) => localStorage.removeItem(key));
+}
+
+// 토큰 만료까지 남은 분 (로그인할 때 서버가 준 expires_in 기준, 모르면 null)
+function tokenMinutesLeft() {
+    const expiresAt = Number(localStorage.getItem('token_expires_at'));
+    return expiresAt ? Math.floor((expiresAt - Date.now()) / 60000) : null;
+}
+
+// 토큰이 만료돼 로그인 화면으로 보낸다
+function goLoginExpired() {
+    clearAuth();
+    try {
+        sessionStorage.setItem(AUTH_EXPIRED_KEY, '1');
+    } catch {
+        // 저장이 막힌 브라우저면 안내만 빠진다
+    }
+    window.location.href = '/';
+}
+
 function formatApiError(data) {
     if (data.detail) return data.detail;
     const messages = Object.entries(data).map(
@@ -39,8 +65,7 @@ async function apiFetch(path, options = {}) {
 
     // 로그인 요청이 아닌데 401이면 토큰 만료/무효 → 로그인 화면으로
     if (response.status === 401 && path !== '/auth/login/') {
-        localStorage.clear();
-        window.location.href = '/';
+        goLoginExpired();
         throw new Error('로그인이 만료되었습니다. 다시 로그인해주세요.');
     }
 
@@ -70,8 +95,7 @@ async function apiDownload(path, fallbackName) {
     });
 
     if (response.status === 401) {
-        localStorage.clear();
-        window.location.href = '/';
+        goLoginExpired();
         throw new Error('로그인이 만료되었습니다. 다시 로그인해주세요.');
     }
     if (!response.ok) {

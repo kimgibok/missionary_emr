@@ -103,10 +103,11 @@ superuser는 백엔드 권한을 전부 통과하므로 nav에서 모든 역할 
 - `DrugBatch`는 창고 전체 재고(미션과 무관, source = 후원/현지/구매/현지구매/기타 + source_detail), `MissionStock`은 미션에 챙겨간 몫이다. **처방 시 재고 차감은 `MissionStock.remaining_qty`에서** 일어난다.
   정산: `donated_qty`를 입력하면 `remaining_qty − donated_qty`를 `DrugBatch.remaining_qty`에 합산하고 `is_settled=True`.
   **재고 규칙(관리자 API)**: 배치 입고 = 창고 잔량 = 입고량(입고량 수정 시 잔량도 같은 만큼) / 미션 배분 = 창고 − 배분량, 현장 = 배분량 /
-  배분량 수정 = 차이만큼 창고↔현장(정산 전, 현장 잔량 안에서) / 배분 삭제 = 현장 잔량을 창고로(조제에 쓰였거나 정산했으면 불가) /
+  배분량 수정 = 차이만큼 창고↔현장(정산 전, 현장 잔량 안에서) / 배분 삭제 = 현장 잔량을 창고로(조제에 쓰였거나 정산했거나 보정 이력이 있으면 불가 - 보정한 배분은 기부량 0으로 정산해서 정리) /
   정산 = 창고 + (현장 잔량 − 기부량), 두 번 정산 불가. 같은 미션에 같은 배치는 한 번만 배분(더 챙기면 배분량 수정).
   창고 잔량은 일반 PATCH로 못 바꾸고, 실사 차이는 `adjust`(사유 필수)로만 고친다 → `StockAdjustment`(전→후·사유·누가·언제)에 이력이 남는다. 현장 잔량도 정산 전이면 같은 방식.
 - `StockAdjustment`: 재고 직접 보정 이력. `drugbatch` 또는 `mission_stock` 중 하나. 배분·정산 같은 자동 이동은 남기지 않는다.
+  FK가 CASCADE라 대상을 지우면 이력도 사라지므로, 보정 이력이 있는 창고 배치·미션 재고는 삭제를 막는다(API 400).
 - `SiteConfig`: 현장 설정, 행 하나(pk=1, `SiteConfig.load()`). `time_zone`(IANA 이름, 비면 `settings.TIME_ZONE`), `updated_by`, `updated_at`.
 
 **주요 업무 규칙**
@@ -138,7 +139,7 @@ superuser는 백엔드 권한을 전부 통과하므로 nav에서 모든 역할 
 
 ## 6. API 요약
 
-모든 요청 헤더: `Authorization: Token <키>`. 로그인 응답: `token`, `name`, `is_superuser`, `current_missions`.
+모든 요청 헤더: `Authorization: Token <키>`. 로그인 응답: `token`, `name`, `is_superuser`, `current_missions`, `expires_in`(토큰 유효 초, 화면이 `token_expires_at`으로 저장해 만료 전 알림에 쓴다).
 로그인할 때마다 이전 토큰은 삭제되고 새로 발급된다.
 
 | 구분 | 엔드포인트 |
@@ -183,6 +184,8 @@ POST처럼 대상 객체가 없는 요청은 뷰의 `perform_create`에서 `owns
 **프론트엔드**
 - API 호출은 반드시 `static/js/api.js`의 `apiFetch()`를 거친다(토큰 부착, 401이면 로그인 화면으로, 오류 메시지 가공).
   엑셀처럼 파일을 받을 때는 `apiDownload(path, 기본파일명)`을 쓴다(파일명은 서버의 `filename*=UTF-8''…`).
+- 로그아웃·토큰 만료 때는 `clearAuth()`(api.js, 로그인 키만)로 지운다. `localStorage.clear()`는 쓰지 않는다 - 약국 출력 PC의 [자동 출력]·용지, 마지막 탭 같은 기기 설정까지 지워진다.
+  401이면 `goLoginExpired()`가 로그인 화면으로 보내고, 로그인 화면이 "로그인이 만료되었습니다"를 크게 보여준다(sessionStorage `auth_expired`).
 - 요약 숫자 칸(`.stats-summary` / `.stat-tile`)과 통계 표(`.stats-table`, 숫자 칸 `.stats-qty`, 열이 많으면 `.table-scroll`로 감싸 폰에서 가로 스크롤)는 `base.css` 공용이다.
 - 사람이 입력한 문자열을 `innerHTML`에 넣을 때는 `escapeHtml()`을 거친다.
 - 여러 페이지가 쓰는 화면 도우미(`escapeHtml`, `showToast`, `patientMeta`, `doctorLabel`, `byId`, `todayStr`, `dateTimeLabel`)는 `common.js`에만 둔다. 페이지 js에 다시 정의하지 않는다 — 일반 `<script>`끼리는 `const`·`let` 이름을 공유해서, `const byId`가 두 번 있으면 페이지 전체가 멈춘다.
@@ -232,12 +235,12 @@ POST처럼 대상 객체가 없는 요청은 뷰의 `perform_create`에서 `owns
 
 **다음 작업**
 - 현장 투입 전 정리 (`fix/` 브랜치, 2026-11-24 전체 리뷰 결과)
-  - 로그아웃·401 때 `localStorage.clear()` 대신 로그인 키(토큰·이름·권한·미션)만 지운다 - 지금은 약국 출력 PC의 [자동 출력]·용지 설정까지 지워진다.
-    토큰 8시간 만료는 그대로 두고(결정: 다시 로그인), 만료되면 출력 PC가 모르고 지나가지 않게 화면에 크게 알린다.
-  - 하루 목록 `page_size=200` → 500 (접수 완료 `reception.js`, 조제 대기·수령 완료 `pharmacy.js`, 접수 대기도 같이).
-  - `patient-intake.js`의 `alert()` → `showToast`, `piEscape` → `escapeHtml`(common.js), `info.html`에 `common.js` 추가, `info.js` escape·인라인 style 정리.
-  - 엑셀 시트 이름에서 `/ ? * [ ] :`를 빼기(지금은 그런 분류 이름이 있으면 export 500).
-  - 미션 재고 배분 삭제 시 보정 이력이 CASCADE로 지워짐 → 보정 이력이 있으면 삭제를 막을지 정한다.
+  - 완료: 로그아웃·만료 때 로그인 키만 지움(`clearAuth`), 만료되면 로그인 화면에 크게 알림, 자동 출력 PC는 만료 30분 전부터 상태줄에 경고(토큰 8시간은 그대로 - 결정: 다시 로그인)
+  - 완료: 하루 목록 `page_size` 200 → 500 (접수 대기·완료, 조제 대기, 수령 완료)
+  - 완료: 안내팀 정리 - `patient-intake.js`의 `alert()` → `showToast`, `piEscape` → `escapeHtml`, `info.html`에 `common.js`·`reception.css`·토스트, `info.js` escape·인라인 style 제거
+  - 완료: 엑셀 시트 이름의 `\ / ? * [ ] :`를 `·`로 바꿈
+  - 완료: 보정 이력이 있는 창고 배치·미션 재고는 삭제 불가(결정 (a) - 이력은 숫자가 안 맞는 이유의 유일한 기록)
+  - 남은 것: `fix/field-readiness` PR
 - 약국 통계 탭의 재고 소진 예상: 약을 정해진 만큼만 가져가 현지에서 더 구하기 어려워, 미션 중에는 쓸모가 적을 수 있다.
   현장 피드백을 받아 필요 없으면 뺀다(다음 미션 계획용 정보는 관리자 '다음 미션 준비표'로).
 - 조제지 실제 프린터 출력 확인: 아직 못 해 봤다(영수증 프린터 예정, 80mm·58mm·A4는 크롬 PDF로만 확인). 현장 프린터가 정해지면 `--kiosk-printing`과 드라이버 용지·자르기 설정을 같이 확인한다.
@@ -264,7 +267,6 @@ POST처럼 대상 객체가 없는 요청은 뷰의 `perform_create`에서 `owns
 - 누가 언제 무엇을 수정했는지 남기는 감사 로그(audit log).
 - 어제 이전의 미처리 배정을 자동으로 정리할지(현재는 오늘 날짜만 화면에 보여주고 DB에는 남긴다).
 - `Prescription`에 작성자 필드가 없어 "그 처방이 달린 배정의 의사"를 작성자로 본다. superuser가 대신 쓴 처방도 배정 의사 것으로 잡힌다.
-- 안내팀(`info.js`)은 아직 `common.js`를 쓰지 않고, 오류 메시지를 escape 없이 `innerHTML`에 넣는 곳이 있다.
 
 ## 11. 주의사항 (알려진 함정)
 
