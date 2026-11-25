@@ -174,7 +174,7 @@ class DrugBatchViewSet(ProtectedDeleteMixin, viewsets.ModelViewSet):
         super().perform_destroy(instance)
 
     def get_queryset(self):
-        qs = DrugBatch.objects.select_related('drug').order_by('drug__name', 'expiry_date', 'id')
+        qs = DrugBatch.objects.select_related('drug__cat1', 'drug__cat2').order_by('drug__name', 'expiry_date', 'id')
         params = self.request.query_params
         if params.get('drug'):
             qs = qs.filter(drug_id=params['drug'])
@@ -208,7 +208,7 @@ class MissionStockViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = (
-            MissionStock.objects.select_related('drugbatch__drug__cat1')
+            MissionStock.objects.select_related('drugbatch__drug__cat1', 'drugbatch__drug__cat2')
             .annotate(used_qty=Coalesce(Sum('dispensed_items__quantity'), 0))
             .order_by('drugbatch__drug__name', 'drugbatch__expiry_date', 'id')
         )

@@ -90,16 +90,16 @@
                 <p class="section-hint" id="ms-summary"></p>
                 <p class="section-hint">창고에서 이 미션에 챙겨 간 배치입니다. 약국이 조제하면 현장 잔량이 줄고,
                     미션이 끝나면 [정산]으로 현지 기부량을 뺀 나머지를 창고로 돌려줍니다.</p>
-                <div class="admin-filters">
+                <div class="admin-filters is-two">
                     <input class="field-input" type="search" id="ms-search" placeholder="약품명·성분으로 찾기">
                     <select class="field-input" id="ms-filter-status" aria-label="정산 상태로 거르기">
                         <option value="">정산 상태 전체</option>
                         <option value="open">정산 전</option>
                         <option value="settled">정산 완료</option>
                     </select>
-                    <select class="field-input" id="ms-filter-cat1" aria-label="분류로 거르기"></select>
                 </div>
-                <div id="ms-list" class="admin-list"></div>
+                <div class="cat-chips" id="ms-cats" role="group" aria-label="분류로 거르기"></div>
+                <div id="ms-list"></div>
             </section>
         </div>
 
@@ -131,7 +131,8 @@
                         <option value="empty">창고 잔량 0</option>
                     </select>
                 </div>
-                <div id="batch-list" class="admin-list"></div>
+                <div class="cat-chips" id="batch-cats" role="group" aria-label="분류로 거르기"></div>
+                <div id="batch-list"></div>
             </section>
         </div>
 
