@@ -47,6 +47,7 @@ missionary_emr/
 │   ├─ permissions.py       role_permission() 팩토리, get_active_memberships(), 본인 배정·처방 확인용 클래스/함수
 │   ├─ pagination.py        FlexiblePagination (기본 20, ?page_size= 최대 500)
 │   ├─ middleware.py        SiteTimezoneMiddleware - 요청마다 현장 시간대(SiteConfig)를 timezone.activate()
+│   ├─ management/commands/import_drugs.py   약품 리스트 엑셀 → 분류·약품·창고 배치 (기본 미리보기, --commit)
 │   ├─ templatetags/static_version.py   {% static_v %} - 정적 파일 주소에 ?v=수정시각 (캐시 자동 갱신)
 │   ├─ serializers.py / views.py / urls.py / admin.py
 ├─ management/              관리자 전용 API (모델 없음, clinic 모델을 import해서 사용)
@@ -255,7 +256,11 @@ POST처럼 대상 객체가 없는 요청은 뷰의 `perform_create`에서 `owns
   - 미션 생성과 계정 역할 배정(`MissionMembership`)은 Django admin에 둔다.
   - 약 통계(미션 선택 가능, 엑셀 포함): 분류(cat1·cat2)별·진료과별 사용량, 그리고 다음 미션 준비표(약마다 챙겨 간 양·쓴 양·남은 양·하루 평균).
     약국 화면은 "오늘 일하는 화면", 관리자는 "돌아보고 다음 미션을 계획하는 화면"으로 나눈다. 약국팀장도 필요하면 같은 API를 약국 탭에 붙인다.
-- 약품 리스트 엑셀(`약품_리스트_아가페_2026_약품분류용1.xlsx`)을 `Drug`/`DrugCategory`/`DrugBatch`로 가져오는 `import_drugs` 관리 커맨드 (시트: 약속처방, 경구, 외용약, 비타민, 주사제, 소아, 추가약)
+- 약품 가져오기 `import_drugs` 완료(`feature/import-drugs`): `python manage.py import_drugs "db/약품_리스트_아가페_2026_약품분류용1.xlsx"`(미리보기) → `--commit`.
+  시트 '2026-경구' → 분류 '경구', '분류' 열 → 세부 분류(띄어쓰기 무시하고 기존 이름 사용, '외용약'→'외용'), 한 줄 = 창고 배치. 같은 배치는 다시 넣지 않아 두 번 돌려도 안전하다.
+  출처 기본 후원·입고일 기본 오늘(`--source`, `--received-date`). 약속처방 세트 = 약 하나('약속처방(OS)', 단위 포). 소아 시럽은 수량이 없어 1병씩.
+  복용스케줄: 경구·비타민 켬, 소아(시럽, 병 단위)·외용·주사제·추가약 끔 - 커맨드가 기존 분류 값도 맞춘다.
+  - 할 일: 유통기한이 없는 경구·비타민·소아·약속처방은 **임시 2099-12-31**로 들어간다 → 관리자 [창고 재고]에서 실제 날짜로 고친다. 엑셀의 코푸정은 '근이완제'로 분류돼 있다(진해거담제로 보임).
 - 진료 차트 양식(`고객등록카드(캄보디아) - 2025.hwp`)에 있는 치과 차트(Primary/Permanent teeth) 모델과 화면
 - 수술팀 워크플로우, 통계 문서 저장(PDF/엑셀) 같은 부가 기능
 - 환자용 그림 복용지도(아침/점심/저녁, 식전/식후 그림). 지금 처방에는 1회량·1일 횟수·일수와 약의 `usage` 글자뿐이라, 복용 시점을 처방 입력에 먼저 추가해야 한다.
