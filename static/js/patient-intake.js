@@ -1,4 +1,5 @@
-// 공용: 환자 검색 + 신규 등록 + 방문 등록
+// 공용: 환자 검색 + 신규 등록 + 방문 등록 (안내팀·접수팀)
+// escapeHtml, sexLabel, showToast는 common.js - common.js 다음에 불러온다
 // 페이지에 #search-input, #search-btn, #search-results,
 // #new-patient-form(name_kr, name_local, sex, birth_year, weight)이 있어야 함
 // 사용법: initPatientIntake({ onVisitCreated(visit) })
@@ -8,12 +9,6 @@ function initPatientIntake({ onVisitCreated }) {
     const searchBtn = document.getElementById('search-btn');
     const resultsEl = document.getElementById('search-results');
     const form = document.getElementById('new-patient-form');
-
-    function piEscape(value) {
-        return String(value ?? '')
-            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-    }
 
     async function registerVisit(patientId, weight) {
         try {
@@ -27,7 +22,7 @@ function initPatientIntake({ onVisitCreated }) {
 
             onVisitCreated(visit);
         } catch (err) {
-            alert(err.message);
+            showToast(err.message, true);
         }
     }
 
@@ -46,8 +41,8 @@ function initPatientIntake({ onVisitCreated }) {
             resultsEl.innerHTML = data.results.map(p => `
                 <div class="patient-item">
                     <div>
-                        <div class="patient-item-name">${piEscape(p.name_kr)}</div>
-                        <div class="patient-item-meta">${p.sex === 'M' ? '남' : '여'} · ${p.birth_year}년생</div>
+                        <div class="patient-item-name">${escapeHtml(p.name_kr)}</div>
+                        <div class="patient-item-meta">${sexLabel(p.sex)} · ${p.birth_year}년생</div>
                     </div>
                     <button class="btn-primary btn-inline" type="button" data-patient-id="${p.id}">방문 등록</button>
                 </div>
@@ -69,7 +64,7 @@ function initPatientIntake({ onVisitCreated }) {
                 });
             });
         } catch (err) {
-            alert(err.message);
+            showToast(err.message, true);
         }
     }
 
@@ -98,7 +93,7 @@ function initPatientIntake({ onVisitCreated }) {
             await registerVisit(patient.id, document.getElementById('weight').value);
             form.reset();
         } catch (err) {
-            alert(err.message);
+            showToast(err.message, true);
         }
     });
 }
