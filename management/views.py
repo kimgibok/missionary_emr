@@ -1,3 +1,4 @@
+import re
 from io import BytesIO
 from urllib.parse import quote
 from zoneinfo import ZoneInfo, available_timezones
@@ -509,6 +510,7 @@ class DrugStatsView(APIView):
 # =====================================================
 
 SEX_LABEL = {'M': '남', 'F': '여'}
+INVALID_SHEET_CHARS = re.compile(r'[\\/?*\[\]:]')   # 엑셀 시트 이름에 못 쓰는 글자
 
 
 def add_visit_stats_sheet(wb, stats):
@@ -583,7 +585,8 @@ class MissionStockExportView(APIView):
             )
             if not stocks.exists():
                 continue
-            title = f'재고-{cat1.name}'[:31]  # 시트명 31자 제한, 통계 시트와 이름이 겹치지 않게 '재고-'를 붙인다
+            # 엑셀 시트 이름은 31자까지, \ / ? * [ ] : 는 못 쓴다(쓰면 오류). 통계 시트와 겹치지 않게 '재고-'를 붙인다
+            title = f'재고-{INVALID_SHEET_CHARS.sub("·", cat1.name)}'[:31]
             if title in taken:
                 continue
             taken.add(title)
