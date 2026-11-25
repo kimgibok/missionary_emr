@@ -3,7 +3,7 @@ from rest_framework.routers import DefaultRouter
 
 from .views import (
     DrugCategory1ViewSet, DrugCategory2ViewSet, DrugViewSet, DrugBatchViewSet, MissionStockViewSet,
-    MissionListView, VisitStatsView, DrugStatsView, MissionStockExportView, StockAdjustmentListView,
+    MissionListView, VisitStatsView, DrugStatsView, MissionStockExportView, StockAdjustmentListView, SiteConfigView,
 )
 
 router = DefaultRouter()
@@ -20,4 +20,5 @@ urlpatterns = [
     path('drug-stats/', DrugStatsView.as_view(), name='drug-stats'),
     path('mission-stocks/export/', MissionStockExportView.as_view(), name='mission-stock-export'),
     path('stock-adjustments/', StockAdjustmentListView.as_view(), name='stock-adjustment-list'),
+    path('site-config/', SiteConfigView.as_view(), name='site-config'),
 ] + router.urls

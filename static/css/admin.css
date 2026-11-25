@@ -350,3 +350,100 @@
     padding: 8px 10px;
     text-align: right;
 }
+
+/* ---------- 설정 탭 - 현장 시간대 ---------- */
+.tz-clock {
+    margin: 16px 0 20px;
+    padding: 18px 20px;
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+}
+
+.tz-clock-main {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    column-gap: 14px;
+    row-gap: 2px;
+    margin-bottom: 12px;
+}
+
+.tz-clock-label {
+    flex-basis: 100%;
+    font-size: 13px;
+    color: var(--color-text-muted);
+}
+
+.tz-clock-date,
+.tz-clock-time {
+    font-size: 26px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+}
+
+.tz-clock-date small {
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--color-text-muted);
+}
+
+.tz-clock-time {
+    color: var(--color-accent);
+}
+
+.tz-clock-rows {
+    display: grid;
+    gap: 6px;
+    margin: 0;
+    font-size: 14px;
+}
+
+.tz-clock-rows > div {
+    display: flex;
+    gap: 12px;
+}
+
+.tz-clock-rows dt {
+    flex: none;
+    width: 84px;
+    color: var(--color-text-muted);
+}
+
+.tz-clock-rows dd {
+    margin: 0;
+    font-variant-numeric: tabular-nums;
+}
+
+.tz-clock-rows .is-ok dd {
+    color: var(--color-success);
+}
+
+.tz-clock-rows .is-warn dd {
+    color: var(--color-danger);
+    font-weight: 600;
+}
+
+/* 시간대 고르기 + 저장 - 넓으면 한 줄, 폰에서는 쌓인다 */
+.tz-form {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 12px;
+}
+
+.tz-form-field {
+    flex: 1 1 240px;
+    min-width: 0;
+}
+
+.tz-form-field .field-input {
+    margin-bottom: 0;
+}
+
+.tz-updated {
+    margin-top: 10px;
+    font-size: 13px;
+    color: var(--color-text-muted);
+}

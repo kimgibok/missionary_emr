@@ -245,3 +245,22 @@ class StockAdjustment(models.Model):
     def __str__(self):
         target = self.drugbatch or self.mission_stock
         return f"{target}: {self.before_qty} → {self.after_qty} ({self.reason})"
+
+
+class SiteConfig(models.Model):
+    """
+    현장 설정 - 행은 하나(pk=1)만 쓴다. SiteConfig.load()로 읽는다.
+    time_zone: 현장 시간대(IANA 이름, 예: 'Asia/Phnom_Penh'). 비어 있으면 settings.TIME_ZONE.
+    요청마다 clinic.middleware.SiteTimezoneMiddleware가 이 값으로 timezone.activate() 한다.
+    """
+    time_zone = models.CharField(max_length=64, blank=True)
+    updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
+    updated_at = models.DateTimeField(null=True, blank=True)
+
+    @classmethod
+    def load(cls):
+        config, _ = cls.objects.get_or_create(pk=1)
+        return config
+
+    def __str__(self):
+        return f"현장 설정 (시간대 {self.time_zone or '기본값'})"

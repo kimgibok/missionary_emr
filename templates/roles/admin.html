@@ -180,8 +180,30 @@
         <!-- ===== 설정 ===== -->
         <div class="tab-panel" id="tab-settings" role="tabpanel" hidden>
             <section class="card">
-                <h2 class="card-title">설정</h2>
-                <p class="empty-text">다음 단계에서 만듭니다.</p>
+                <div class="card-head">
+                    <h2 class="card-title">현장 시간대</h2>
+                </div>
+                <p class="modal-note">'오늘' 기준(접수·진료·약국 목록, 진행 중인 미션)과 화면의 시각이 이 시간대를 따릅니다.
+                    현장에 도착하면 먼저 확인하세요.</p>
+
+                <div class="tz-clock" id="tz-clock">
+                    <p class="empty-text">불러오는 중…</p>
+                </div>
+
+                <div class="tz-form">
+                    <div class="tz-form-field">
+                        <label class="field-label" for="tz-select">시간대</label>
+                        <select class="field-input" id="tz-select"></select>
+                    </div>
+                    <div class="tz-form-field" id="tz-custom-wrap" hidden>
+                        <label class="field-label" for="tz-custom">시간대 이름 (IANA)</label>
+                        <input class="field-input" type="text" id="tz-custom" maxlength="64" placeholder="예: Asia/Phnom_Penh"
+                               autocomplete="off" autocapitalize="off" spellcheck="false">
+                    </div>
+                    <button class="btn-primary btn-inline" type="button" id="tz-save-btn">저장</button>
+                </div>
+                <p class="error-message" id="tz-error"></p>
+                <p class="tz-updated" id="tz-updated"></p>
             </section>
         </div>
     </main>

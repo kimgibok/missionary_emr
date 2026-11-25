@@ -1,5 +1,6 @@
 from io import BytesIO
 from urllib.parse import quote
+from zoneinfo import ZoneInfo, available_timezones
 
 from django.db import transaction
 from django.db.models import Case, Count, F, IntegerField, Q, Sum, Value, When
@@ -15,9 +16,10 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from clinic.middleware import get_site_time_zone
 from clinic.models import (
     Drug, DrugCategory1, DrugCategory2, DrugBatch, Mission, MissionStock,
-    Prescription, PrescriptionDrug, StockAdjustment,
+    Prescription, PrescriptionDrug, SiteConfig, StockAdjustment,
 )
 
 from .permissions import IsSuperUser
@@ -301,6 +303,52 @@ class StockAdjustmentListView(generics.ListAPIView):
         if params.get('mission_stock'):
             return qs.filter(mission_stock_id=params['mission_stock'])
         raise ValidationError({'detail': 'drugbatch 또는 mission_stock 쿼리 파라미터가 필요합니다.'})
+
+
+# =====================================================
+# 설정 - 현장 시간대
+# =====================================================
+
+class SiteConfigView(APIView):
+    """
+    GET: 현장 시간대 + 서버 기준 오늘 날짜·지금 시각 (설정 실수를 바로 알아보게)
+    PATCH {time_zone}: 시간대 변경 (IANA 이름, 예: 'Asia/Phnom_Penh'). 다음 요청부터 모든 기기에 적용된다.
+    시각 글자(server_time 등)는 서버가 현장 시간대로 만들어 준다 - 기기 시간대가 달라도 서버 기준으로 보이게.
+    """
+    permission_classes = [IsSuperUser]
+
+    def get(self, request):
+        return Response(self.site_config_data())
+
+    def patch(self, request):
+        name = str(request.data.get('time_zone') or '').strip()
+        if name not in available_timezones():
+            raise ValidationError({'detail': f'알 수 없는 시간대입니다: {name or "(빈 값)"}. 예: Asia/Phnom_Penh'})
+        with transaction.atomic():
+            config = SiteConfig.load()
+            config.time_zone = name
+            config.updated_by = request.user
+            config.updated_at = timezone.now()
+            config.save()
+        # 이 요청은 바꾸기 전 시간대로 시작했으므로 새 시간대로 다시 켜서 응답한다
+        timezone.activate(ZoneInfo(name))
+        return Response(self.site_config_data())
+
+    @staticmethod
+    def site_config_data():
+        config = SiteConfig.objects.filter(pk=1).select_related('updated_by').first()
+        now = timezone.localtime()
+        updated_by = config.updated_by if config else None
+        return {
+            'time_zone': get_site_time_zone(),
+            'is_default': not (config and config.time_zone),    # 관리자 화면에서 아직 안 골랐으면 True
+            'server_today': timezone.localdate(),
+            'server_time': now.strftime('%H:%M'),
+            'server_wall': now.strftime('%Y-%m-%dT%H:%M:%S'),   # 기기 시계와 비교용 (현장 벽시계 시각)
+            'utc_offset': now.strftime('%z'),                    # '+0700'
+            'updated_by_name': (updated_by.name or updated_by.username) if updated_by else '',
+            'updated_at': timezone.localtime(config.updated_at).strftime('%Y-%m-%d %H:%M') if config and config.updated_at else '',
+        }
 
 
 # =====================================================

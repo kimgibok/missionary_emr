@@ -6,6 +6,7 @@
 //   4. 약품 탭 - 약품·분류·세부 분류 추가·수정·삭제, 검색
 //   5. 창고 재고 탭 - 입고 배치 추가·수정·삭제, 잔량 보정·이력 (보정·이력 모달은 미션 재고와 공용)
 //   6. 미션 재고 탭 - 배분 추가, 배분량 수정, 현장 잔량 보정, 정산(한 줄 / 한꺼번에), 삭제
+//   7. 설정 탭 - 현장 시간대 (서버 기준 오늘·지금 시각, 이 기기 시계 비교)
 // escapeHtml, showToast, byId는 common.js
 // =====================================================
 
@@ -1222,6 +1223,155 @@ byId('ms-filter-status').addEventListener('change', renderMissionStocks);
 byId('ms-filter-cat1').addEventListener('change', renderMissionStocks);
 
 TAB_LOADERS['mission-stock'] = loadMissionStocks;
+
+
+// =====================================================
+// 7. 설정 탭 - 현장 시간대
+//    서버 기준 오늘·지금 시각과 이 기기 시계를 같이 보여줘 설정 실수를 바로 알아보게 한다.
+// =====================================================
+
+const TZ_CHOICES = [
+    ['Asia/Seoul', '한국'],
+    ['Asia/Phnom_Penh', '캄보디아'],
+    ['Indian/Antananarivo', '마다가스카르'],
+    ['Asia/Bangkok', '태국'],
+    ['Asia/Ulaanbaatar', '몽골'],
+];
+const TZ_CUSTOM = 'custom';         // 선택지 밖의 시간대는 이름을 직접 입력
+const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
+
+let siteConfig = null;              // 서버 응답 그대로
+
+function tzLabel(name) {
+    const choice = TZ_CHOICES.find(([value]) => value === name);
+    return choice ? `${choice[1]} (${name})` : name;
+}
+
+// '+0700' → 'UTC+7', '+0530' → 'UTC+5:30'
+function offsetLabel(offset) {
+    const sign = offset[0];
+    const hours = Number(offset.slice(1, 3));
+    const minutes = offset.slice(3, 5);
+    return `UTC${sign}${hours}${minutes === '00' ? '' : `:${minutes}`}`;
+}
+
+// 이 기기 시계를 서버(현장 시간대) 벽시계와 비교 - 차이(분), 기기 시각 글자
+function compareDeviceClock(serverWall) {
+    const d = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const deviceWall = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    // 둘 다 '시간대 없는 벽시계 시각'이라 같은 기준(Z)으로 읽어 빼면 된다
+    const diffMinutes = Math.round((Date.parse(`${deviceWall}Z`) - Date.parse(`${serverWall}Z`)) / 60000);
+    return { diffMinutes, label: `${deviceWall.slice(0, 10)} ${deviceWall.slice(11, 16)}` };
+}
+
+function renderSiteClock() {
+    const c = siteConfig;
+    const weekday = WEEKDAYS[new Date(`${c.server_today}T00:00:00Z`).getUTCDay()];
+    const device = compareDeviceClock(c.server_wall);
+    const same = Math.abs(device.diffMinutes) <= 2;
+    const deviceNote = same
+        ? '서버와 같음'
+        : `서버와 ${Math.abs(device.diffMinutes) >= 60
+            ? `${Math.round(Math.abs(device.diffMinutes) / 6) / 10}시간`
+            : `${Math.abs(device.diffMinutes)}분`} 차이 - 이 기기의 날짜·시간대 설정을 확인하세요`;
+
+    byId('tz-clock').innerHTML = `
+        <div class="tz-clock-main">
+            <span class="tz-clock-label">서버 기준 오늘</span>
+            <span class="tz-clock-date">${escapeHtml(c.server_today)} <small>(${weekday})</small></span>
+            <span class="tz-clock-time">${escapeHtml(c.server_time)}</span>
+        </div>
+        <dl class="tz-clock-rows">
+            <div><dt>시간대</dt><dd>${escapeHtml(tzLabel(c.time_zone))} · ${offsetLabel(c.utc_offset)}${c.is_default ? ' <span class="doctor-tag waiting">기본값</span>' : ''}</dd></div>
+            <div class="${same ? 'is-ok' : 'is-warn'}"><dt>이 기기 시각</dt><dd>${escapeHtml(device.label)} · ${escapeHtml(deviceNote)}</dd></div>
+        </dl>`;
+
+    byId('tz-updated').textContent = c.updated_at
+        ? `마지막 변경: ${c.updated_by_name || '알 수 없음'} · ${c.updated_at}`
+        : '아직 관리자 화면에서 고른 적이 없어 서버 기본 설정(local_settings.py)을 쓰고 있습니다.';
+}
+
+function renderTzSelect() {
+    const current = siteConfig.time_zone;
+    const known = TZ_CHOICES.some(([value]) => value === current);
+    byId('tz-select').innerHTML = TZ_CHOICES.map(([value, label]) =>
+        `<option value="${value}"${value === current ? ' selected' : ''}>${label} (${value})</option>`).join('')
+        + `<option value="${TZ_CUSTOM}"${known ? '' : ' selected'}>기타 (직접 입력)</option>`;
+    byId('tz-custom').value = known ? '' : current;
+    byId('tz-custom-wrap').hidden = known;
+}
+
+async function loadSiteConfig() {
+    byId('tz-error').textContent = '';
+    try {
+        siteConfig = await apiFetch('/manage/site-config/');
+    } catch (err) {
+        byId('tz-clock').innerHTML = `<p class="empty-text is-error">${escapeHtml(err.message)}</p>`;
+        return;
+    }
+    renderSiteClock();
+    renderTzSelect();
+}
+
+function chosenTimeZone() {
+    const value = byId('tz-select').value;
+    return value === TZ_CUSTOM ? byId('tz-custom').value.trim() : value;
+}
+
+function openTimeZoneConfirm() {
+    if (!siteConfig || isBusy) return;
+    const errorEl = byId('tz-error');
+    errorEl.textContent = '';
+    const name = chosenTimeZone();
+    if (!name) { errorEl.textContent = '시간대 이름을 입력해주세요. (예: Asia/Phnom_Penh)'; return; }
+    if (name === siteConfig.time_zone && !siteConfig.is_default) { errorEl.textContent = '지금 시간대와 같습니다.'; return; }
+
+    const activeWarning = missions.some((m) => m.is_active)
+        ? `<p class="error-message">진행 중인 미션이 있습니다. '오늘' 기준이 바뀌어 접수·진료·약국 목록이 달라질 수 있어요.
+               현장 시간대가 정말 틀렸을 때만 바꾸세요.</p>`
+        : '';
+    openModal({
+        title: '시간대 변경',
+        bodyHtml: `
+            <p class="adjust-current">${escapeHtml(tzLabel(siteConfig.time_zone))} → <strong>${escapeHtml(tzLabel(name))}</strong></p>
+            <p class="modal-note">저장하면 모든 기기에 바로 적용됩니다. 이미 저장된 기록의 시각은 바뀌지 않아요.</p>
+            ${activeWarning}`,
+        confirmLabel: '바꾸기',
+        onConfirm: () => { saveTimeZone(name); },
+    });
+}
+
+async function saveTimeZone(name) {
+    if (isBusy) return;
+    isBusy = true;
+    try {
+        siteConfig = await apiFetch('/manage/site-config/', { method: 'PATCH', body: JSON.stringify({ time_zone: name }) });
+    } catch (err) {
+        byId('tz-error').textContent = err.message;
+        return;
+    } finally {
+        isBusy = false;
+    }
+    showToast(`시간대를 ${tzLabel(name)}(으)로 바꿨습니다.`);
+    renderSiteClock();
+    renderTzSelect();
+    // '진행중' 미션도 새 '오늘' 기준으로 다시 받는다
+    try {
+        await loadMissions();
+    } catch (err) {
+        showToast(err.message, true);
+    }
+}
+
+byId('tz-select').addEventListener('change', () => {
+    const custom = byId('tz-select').value === TZ_CUSTOM;
+    byId('tz-custom-wrap').hidden = !custom;
+    if (custom) byId('tz-custom').focus();
+});
+byId('tz-save-btn').addEventListener('click', openTimeZoneConfirm);
+
+TAB_LOADERS.settings = loadSiteConfig;
 
 
 // =====================================================
