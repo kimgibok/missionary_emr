@@ -165,6 +165,14 @@ class DrugBatchViewSet(ProtectedDeleteMixin, viewsets.ModelViewSet):
     permission_classes = [IsSuperUser]
     protected_message = '미션에 배분된 배치라 삭제할 수 없습니다. 미션 재고에서 배분을 먼저 지우세요.'
 
+    def perform_destroy(self, instance):
+        # 보정 이력은 숫자가 안 맞는 이유의 유일한 기록이라(지우면 CASCADE로 같이 사라진다) 남긴다
+        if instance.adjustments.exists():
+            raise ValidationError({
+                'detail': '보정 이력이 있는 배치라 삭제할 수 없습니다. 잘못 입력한 거라면 [수정]으로 고치세요.'
+            })
+        super().perform_destroy(instance)
+
     def get_queryset(self):
         qs = DrugBatch.objects.select_related('drug').order_by('drug__name', 'expiry_date', 'id')
         params = self.request.query_params
@@ -215,11 +223,18 @@ class MissionStockViewSet(viewsets.ModelViewSet):
         return qs
 
     def perform_destroy(self, instance):
-        """배분 취소 - 현장 잔량을 창고로 돌려준다. 조제에 쓰였거나 정산이 끝났으면 못 지운다"""
+        """
+        배분 취소 - 현장 잔량을 창고로 돌려준다. 조제에 쓰였거나, 정산이 끝났거나, 보정 이력이 있으면 못 지운다.
+        보정 이력은 숫자가 안 맞는 이유의 유일한 기록이라(지우면 CASCADE로 같이 사라진다) 남긴다 - 정리하려면 기부량 0으로 정산.
+        """
         if instance.is_settled:
             raise ValidationError({'detail': '정산이 끝난 재고는 삭제할 수 없습니다.'})
         if instance.dispensed_items.exists():
             raise ValidationError({'detail': '조제에 쓰인 재고라 삭제할 수 없습니다. 남은 만큼 배분량을 줄이세요.'})
+        if instance.adjustments.exists():
+            raise ValidationError({
+                'detail': '보정 이력이 있는 재고라 삭제할 수 없습니다. 남은 양을 창고로 돌리려면 기부량 0으로 정산하세요.'
+            })
         try:
             with transaction.atomic():
                 return_to_warehouse(instance.drugbatch_id, instance.remaining_qty)

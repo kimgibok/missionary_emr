@@ -103,10 +103,11 @@ superuser는 백엔드 권한을 전부 통과하므로 nav에서 모든 역할 
 - `DrugBatch`는 창고 전체 재고(미션과 무관, source = 후원/현지/구매/현지구매/기타 + source_detail), `MissionStock`은 미션에 챙겨간 몫이다. **처방 시 재고 차감은 `MissionStock.remaining_qty`에서** 일어난다.
   정산: `donated_qty`를 입력하면 `remaining_qty − donated_qty`를 `DrugBatch.remaining_qty`에 합산하고 `is_settled=True`.
   **재고 규칙(관리자 API)**: 배치 입고 = 창고 잔량 = 입고량(입고량 수정 시 잔량도 같은 만큼) / 미션 배분 = 창고 − 배분량, 현장 = 배분량 /
-  배분량 수정 = 차이만큼 창고↔현장(정산 전, 현장 잔량 안에서) / 배분 삭제 = 현장 잔량을 창고로(조제에 쓰였거나 정산했으면 불가) /
+  배분량 수정 = 차이만큼 창고↔현장(정산 전, 현장 잔량 안에서) / 배분 삭제 = 현장 잔량을 창고로(조제에 쓰였거나 정산했거나 보정 이력이 있으면 불가 - 보정한 배분은 기부량 0으로 정산해서 정리) /
   정산 = 창고 + (현장 잔량 − 기부량), 두 번 정산 불가. 같은 미션에 같은 배치는 한 번만 배분(더 챙기면 배분량 수정).
   창고 잔량은 일반 PATCH로 못 바꾸고, 실사 차이는 `adjust`(사유 필수)로만 고친다 → `StockAdjustment`(전→후·사유·누가·언제)에 이력이 남는다. 현장 잔량도 정산 전이면 같은 방식.
 - `StockAdjustment`: 재고 직접 보정 이력. `drugbatch` 또는 `mission_stock` 중 하나. 배분·정산 같은 자동 이동은 남기지 않는다.
+  FK가 CASCADE라 대상을 지우면 이력도 사라지므로, 보정 이력이 있는 창고 배치·미션 재고는 삭제를 막는다(API 400).
 - `SiteConfig`: 현장 설정, 행 하나(pk=1, `SiteConfig.load()`). `time_zone`(IANA 이름, 비면 `settings.TIME_ZONE`), `updated_by`, `updated_at`.
 
 **주요 업무 규칙**
@@ -238,7 +239,8 @@ POST처럼 대상 객체가 없는 요청은 뷰의 `perform_create`에서 `owns
   - 완료: 하루 목록 `page_size` 200 → 500 (접수 대기·완료, 조제 대기, 수령 완료)
   - 완료: 안내팀 정리 - `patient-intake.js`의 `alert()` → `showToast`, `piEscape` → `escapeHtml`, `info.html`에 `common.js`·`reception.css`·토스트, `info.js` escape·인라인 style 제거
   - 완료: 엑셀 시트 이름의 `\ / ? * [ ] :`를 `·`로 바꿈
-  - 남은 것: 미션 재고 배분 삭제 시 보정 이력이 CASCADE로 지워짐 → 보정 이력이 있으면 삭제를 막을지 정한다.
+  - 완료: 보정 이력이 있는 창고 배치·미션 재고는 삭제 불가(결정 (a) - 이력은 숫자가 안 맞는 이유의 유일한 기록)
+  - 남은 것: `fix/field-readiness` PR
 - 약국 통계 탭의 재고 소진 예상: 약을 정해진 만큼만 가져가 현지에서 더 구하기 어려워, 미션 중에는 쓸모가 적을 수 있다.
   현장 피드백을 받아 필요 없으면 뺀다(다음 미션 계획용 정보는 관리자 '다음 미션 준비표'로).
 - 조제지 실제 프린터 출력 확인: 아직 못 해 봤다(영수증 프린터 예정, 80mm·58mm·A4는 크롬 PDF로만 확인). 현장 프린터가 정해지면 `--kiosk-printing`과 드라이버 용지·자르기 설정을 같이 확인한다.
