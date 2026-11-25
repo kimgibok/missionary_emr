@@ -4,19 +4,217 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ 관리자 }} · 의료선교 EMR</title>
+    <title>관리자 · 의료선교 EMR</title>
     <link rel="stylesheet" href="{% static_v 'css/base.css' %}">
     <link rel="stylesheet" href="{% static_v 'css/nav.css' %}">
     <link rel="stylesheet" href="{% static_v 'css/page.css' %}">
+    <link rel="stylesheet" href="{% static_v 'css/modal.css' %}">
+    <link rel="stylesheet" href="{% static_v 'css/reception.css' %}">
+    <link rel="stylesheet" href="{% static_v 'css/admin.css' %}">
 </head>
 <body>
     {% include 'partials/nav.html' %}
     <main class="page-content">
-        <h1>{{ 관리자 }}</h1>
-        <p style="color: var(--color-text-muted); margin-top: 8px;">준비중입니다.</p>
+        <h1>관리자</h1>
+
+        <div class="tab-bar" id="main-tabs" role="tablist" aria-label="관리자 화면">
+            <button type="button" class="tab-button" role="tab" data-tab="stats">통계</button>
+            <button type="button" class="tab-button" role="tab" data-tab="mission-stock">미션 재고</button>
+            <button type="button" class="tab-button" role="tab" data-tab="warehouse">창고 재고</button>
+            <button type="button" class="tab-button" role="tab" data-tab="drugs">약품</button>
+            <button type="button" class="tab-button" role="tab" data-tab="settings">설정</button>
+        </div>
+
+        <!-- 미션 선택 - 미션별 탭(통계·미션 재고)에서만 보인다 -->
+        <div class="mission-bar" id="mission-bar" hidden>
+            <div class="mission-chips" id="mission-chips" role="radiogroup" aria-label="미션 선택"></div>
+        </div>
+
+        <!-- ===== 통계 ===== -->
+        <div class="tab-panel" id="tab-stats" role="tabpanel" hidden>
+            <div class="stats-head">
+                <p class="section-hint" id="stats-mission-label"></p>
+                <button class="btn-primary btn-inline" type="button" id="stats-export-btn">엑셀 다운로드</button>
+            </div>
+
+            <div class="stats-summary" id="admin-stats-summary"></div>
+
+            <section class="card">
+                <div class="card-head">
+                    <h2 class="card-title">진료과별 환자 수</h2>
+                </div>
+                <p class="section-hint">진료 완료된 처방 기준입니다. 두 과를 본 환자는 각 과에 1명씩 세므로, 과별 합계가 전체보다 클 수 있습니다.</p>
+                <div class="table-scroll" id="visit-stats-table"></div>
+            </section>
+
+            <section class="card">
+                <div class="card-head">
+                    <h2 class="card-title">약 사용량 · 분류별</h2>
+                    <div class="tab-bar mini-tabs" id="category-tabs" role="radiogroup" aria-label="분류 단계">
+                        <button type="button" class="tab-button" data-level="cat1">분류</button>
+                        <button type="button" class="tab-button" data-level="cat2">세부 분류</button>
+                    </div>
+                </div>
+                <p class="section-hint">약국에서 수령 처리된 약 기준입니다.</p>
+                <div id="category-stats-table"></div>
+            </section>
+
+            <section class="card">
+                <div class="card-head">
+                    <h2 class="card-title">약 사용량 · 진료과별</h2>
+                </div>
+                <p class="section-hint">진료과를 누르면 그 과에서 쓴 약이 보입니다.</p>
+                <div id="department-stats"></div>
+            </section>
+
+            <section class="card">
+                <div class="card-head">
+                    <h2 class="card-title">다음 미션 준비표</h2>
+                    <span class="count-badge" id="prep-days">진료한 날 0일</span>
+                </div>
+                <p class="section-hint">약마다 챙겨 간 양 · 쓴 양 · 남은 양입니다. 하루 평균은 수령 처리가 있던 날 기준입니다.</p>
+                <div class="table-scroll" id="prep-table"></div>
+            </section>
+        </div>
+
+        <!-- ===== 미션 재고 ===== -->
+        <div class="tab-panel" id="tab-mission-stock" role="tabpanel" hidden>
+            <section class="card">
+                <div class="card-head">
+                    <h2 class="card-title">미션 재고</h2>
+                    <div class="card-head-side">
+                        <button class="btn-secondary btn-small" type="button" id="ms-settle-bulk-btn">한꺼번에 정산</button>
+                        <button class="btn-primary btn-inline" type="button" id="ms-add-btn">배분 추가</button>
+                    </div>
+                </div>
+                <p class="section-hint" id="ms-summary"></p>
+                <p class="section-hint">창고에서 이 미션에 챙겨 간 배치입니다. 약국이 조제하면 현장 잔량이 줄고,
+                    미션이 끝나면 [정산]으로 현지 기부량을 뺀 나머지를 창고로 돌려줍니다.</p>
+                <div class="admin-filters">
+                    <input class="field-input" type="search" id="ms-search" placeholder="약품명·성분으로 찾기">
+                    <select class="field-input" id="ms-filter-status" aria-label="정산 상태로 거르기">
+                        <option value="">정산 상태 전체</option>
+                        <option value="open">정산 전</option>
+                        <option value="settled">정산 완료</option>
+                    </select>
+                    <select class="field-input" id="ms-filter-cat1" aria-label="분류로 거르기"></select>
+                </div>
+                <div id="ms-list" class="admin-list"></div>
+            </section>
+        </div>
+
+        <!-- ===== 창고 재고 ===== -->
+        <div class="tab-panel" id="tab-warehouse" role="tabpanel" hidden>
+            <section class="card">
+                <div class="card-head">
+                    <h2 class="card-title">창고 재고</h2>
+                    <div class="card-head-side">
+                        <span class="count-badge" id="batch-count">0개</span>
+                        <button class="btn-primary btn-inline" type="button" id="batch-add-btn">입고 추가</button>
+                    </div>
+                </div>
+                <p class="section-hint">입고한 배치마다 창고 잔량 / 입고량입니다. 미션에 배분하면 창고에서 빠지고, 정산하면 남은 만큼 돌아옵니다.
+                    실제로 세어 본 수량이 다르면 [잔량 보정]으로 고치세요 (사유가 이력에 남습니다).</p>
+                <div class="admin-filters">
+                    <input class="field-input" type="search" id="batch-search" placeholder="약품명·성분으로 찾기">
+                    <select class="field-input" id="batch-filter-source" aria-label="출처로 거르기">
+                        <option value="">출처 전체</option>
+                        <option value="donation">후원</option>
+                        <option value="local">현지</option>
+                        <option value="purchase">구매</option>
+                        <option value="local_purchase">현지구매</option>
+                        <option value="etc">기타</option>
+                    </select>
+                    <select class="field-input" id="batch-filter-stock" aria-label="잔량으로 거르기">
+                        <option value="">잔량 전체</option>
+                        <option value="left">창고에 남은 것만</option>
+                        <option value="empty">창고 잔량 0</option>
+                    </select>
+                </div>
+                <div id="batch-list" class="admin-list"></div>
+            </section>
+        </div>
+
+        <!-- ===== 약품 ===== -->
+        <div class="tab-panel" id="tab-drugs" role="tabpanel" hidden>
+            <section class="card">
+                <div class="card-head">
+                    <h2 class="card-title">약품</h2>
+                    <div class="card-head-side">
+                        <span class="count-badge" id="drug-count">0종</span>
+                        <button class="btn-primary btn-inline" type="button" id="drug-add-btn">약품 추가</button>
+                    </div>
+                </div>
+                <div class="admin-filters">
+                    <input class="field-input" type="search" id="drug-search" placeholder="약품명·성분으로 찾기">
+                    <select class="field-input" id="drug-filter-cat1" aria-label="분류로 거르기"></select>
+                    <select class="field-input" id="drug-filter-cat2" aria-label="세부 분류로 거르기"></select>
+                </div>
+                <div id="drug-list" class="admin-list"></div>
+            </section>
+
+            <section class="card">
+                <div class="card-head">
+                    <h2 class="card-title">분류</h2>
+                </div>
+                <p class="section-hint">분류는 엑셀 시트 탭(경구·외용·소아 …), 세부 분류는 약리 분류(항생제·진통제 …)입니다. 쓰이고 있는 분류는 삭제할 수 없습니다.</p>
+                <div class="category-columns">
+                    <div>
+                        <div class="category-column-head">
+                            <h3 class="form-section-title">분류</h3>
+                            <button class="btn-secondary btn-small" type="button" data-add-category="cat1">추가</button>
+                        </div>
+                        <div id="cat1-list" class="admin-list"></div>
+                    </div>
+                    <div>
+                        <div class="category-column-head">
+                            <h3 class="form-section-title">세부 분류</h3>
+                            <button class="btn-secondary btn-small" type="button" data-add-category="cat2">추가</button>
+                        </div>
+                        <div id="cat2-list" class="admin-list"></div>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- ===== 설정 ===== -->
+        <div class="tab-panel" id="tab-settings" role="tabpanel" hidden>
+            <section class="card">
+                <div class="card-head">
+                    <h2 class="card-title">현장 시간대</h2>
+                </div>
+                <p class="modal-note">'오늘' 기준(접수·진료·약국 목록, 진행 중인 미션)과 화면의 시각이 이 시간대를 따릅니다.
+                    현장에 도착하면 먼저 확인하세요.</p>
+
+                <div class="tz-clock" id="tz-clock">
+                    <p class="empty-text">불러오는 중…</p>
+                </div>
+
+                <div class="tz-form">
+                    <div class="tz-form-field">
+                        <label class="field-label" for="tz-select">시간대</label>
+                        <select class="field-input" id="tz-select"></select>
+                    </div>
+                    <div class="tz-form-field" id="tz-custom-wrap" hidden>
+                        <label class="field-label" for="tz-custom">시간대 이름 (IANA)</label>
+                        <input class="field-input" type="text" id="tz-custom" maxlength="64" placeholder="예: Asia/Phnom_Penh"
+                               autocomplete="off" autocapitalize="off" spellcheck="false">
+                    </div>
+                    <button class="btn-primary btn-inline" type="button" id="tz-save-btn">저장</button>
+                </div>
+                <p class="error-message" id="tz-error"></p>
+                <p class="tz-updated" id="tz-updated"></p>
+            </section>
+        </div>
     </main>
 
+    {% include 'partials/modal.html' %}
+    <div class="toast" id="toast" role="status"></div>
+
     <script src="{% static_v 'js/api.js' %}"></script>
+    <script src="{% static_v 'js/common.js' %}"></script>
     <script src="{% static_v 'js/nav.js' %}"></script>
+    <script src="{% static_v 'js/modal.js' %}"></script>
+    <script src="{% static_v 'js/admin.js' %}"></script>
 </body>
 </html>

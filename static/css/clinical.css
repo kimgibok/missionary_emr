@@ -234,11 +234,6 @@ textarea.field-input {
     color: var(--color-accent);
 }
 
-/* 목록 영역 안의 오류 문구 (검색 실패 등) */
-.empty-text.is-error {
-    color: var(--color-danger);
-}
-
 .rx-cart-fields {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));

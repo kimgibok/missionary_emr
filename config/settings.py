@@ -54,6 +54,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'clinic.middleware.SiteTimezoneMiddleware',     # 관리자 화면의 현장 시간대를 요청마다 켠다
 ]
 
 ROOT_URLCONF = 'config.urls'
@@ -121,7 +122,8 @@ AUTH_USER_MODEL = 'accounts.User'
 
 LANGUAGE_CODE = 'en-us'
 
-# 기본값은 개발 장소(한국). 현장에서는 config/local_settings.py에서 덮어쓴다.
+# 기본값은 개발 장소(한국). 현장 시간대는 관리자 화면(설정 탭)에서 고르고, 그 값이 우선한다.
+# 관리자 화면에서 아직 안 골랐을 때만 이 값(또는 config/local_settings.py의 값)을 쓴다.
 TIME_ZONE = 'Asia/Seoul'
 
 USE_I18N = True

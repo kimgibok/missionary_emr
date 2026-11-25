@@ -854,12 +854,6 @@ byId('dn-undispense-btn').addEventListener('click', requestUndispense);
 
 const TABS = ['dispense', 'stock', 'stats'];
 
-// 이 기기 날짜 "2026-10-15" (통계 기본 날짜, 재고 유통기한 비교용)
-function todayStr() {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
 function showTab(tab) {
     activeTab = TABS.includes(tab) ? tab : 'dispense';
     localStorage.setItem(TAB_KEY, activeTab);

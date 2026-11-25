@@ -1,6 +1,6 @@
 from django.contrib import admin
 from .models import Mission, Role, MissionMembership, Department, DrugCategory1, DrugCategory2, Patient, Visit, VisitDepartment
-from .models import Drug, DrugBatch, MissionStock, Prescription, PrescriptionDrug
+from .models import Drug, DrugBatch, MissionStock, Prescription, PrescriptionDrug, StockAdjustment
 
 @admin.register(Mission)
 class MissionAdmin(admin.ModelAdmin):
@@ -79,3 +79,7 @@ class PrescriptionAdmin(admin.ModelAdmin):
 @admin.register(PrescriptionDrug)
 class PrescriptionDrugAdmin(admin.ModelAdmin):
     list_display = ('prescription', 'drug', 'dose_per_intake', 'frequency_per_day', 'duration_days', 'quantity')
+
+@admin.register(StockAdjustment)
+class StockAdjustmentAdmin(admin.ModelAdmin):
+    list_display = ('adjusted_at', 'drugbatch', 'mission_stock', 'before_qty', 'after_qty', 'reason', 'adjusted_by')

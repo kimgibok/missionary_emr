@@ -67,3 +67,7 @@
     width: auto;
     margin-bottom: 16px;
 }
+/* 표가 들어가는 모달 (openModal({ wide: true })) */
+.modal-box.is-wide {
+    max-width: 640px;
+}

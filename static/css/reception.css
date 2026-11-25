@@ -10,6 +10,15 @@
     margin-bottom: 0;
 }
 
+/* 카드 머리 오른쪽에 여러 개(배지·버튼·스위치)를 둘 때 */
+.card-head-side {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
 .count-badge {
     padding: 4px 12px;
     background: var(--color-bg);
@@ -29,6 +38,11 @@
 .empty-text {
     font-size: 14px;
     color: var(--color-text-muted);
+}
+
+/* 목록 영역 안의 오류 문구 (검색 실패 등) */
+.empty-text.is-error {
+    color: var(--color-danger);
 }
 
 /* ---------- 대기/완료 리스트 ---------- */

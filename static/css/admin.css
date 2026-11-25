@@ -1,0 +1,449 @@
+/* 관리자 - reception.css(카드 머리·배지·태그·토스트) 다음에 불러온다. 탭은 base.css */
+
+/* ---------- 미션 선택 (가로로 넘기는 칩) ---------- */
+.mission-bar {
+    margin: -8px 0 20px;
+}
+
+.mission-chips {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding: 2px 2px 6px;
+    scroll-snap-type: x proximity;
+    scrollbar-width: thin;
+}
+
+.mission-chip {
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    min-height: 44px;
+    padding: 8px 14px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    text-align: left;
+    scroll-snap-align: start;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.mission-chip.active {
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 1px var(--color-accent);
+}
+
+.mission-chip-top {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.mission-chip-name {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--color-text);
+}
+
+.mission-chip-date {
+    font-size: 12px;
+    color: var(--color-text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+/* "진행중" 배지 - reception.css의 .doctor-tag를 작게 */
+.mission-chip .doctor-tag {
+    padding: 1px 7px;
+    font-size: 11px;
+}
+
+/* ---------- 통계 탭 ---------- */
+.stats-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 14px;
+}
+
+.stats-head .section-hint {
+    margin-bottom: 0;
+}
+
+/* 카드 머리에 들어가는 작은 탭 (분류 / 세부 분류) */
+.tab-bar.mini-tabs {
+    margin: 0;
+    padding: 3px;
+}
+
+.mini-tabs .tab-button {
+    padding: 0 12px;
+    font-size: 13px;
+}
+
+/* 합계 행 */
+.stats-table tr.is-total td {
+    font-weight: 700;
+    border-top: 1px solid var(--color-text-muted);
+}
+
+/* 진료과별 사용량 - 누르면 그 과의 약 목록이 펼쳐진다 */
+.dept-row {
+    border-bottom: 1px solid var(--color-border);
+}
+
+.dept-row summary {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    min-height: 44px;
+    padding: 8px 4px;
+    cursor: pointer;
+    list-style: none;
+}
+
+.dept-row summary::-webkit-details-marker {
+    display: none;
+}
+
+.dept-row summary::before {
+    content: '›';
+    width: 12px;
+    font-size: 18px;
+    color: var(--color-text-muted);
+    transition: transform 0.15s ease;
+}
+
+.dept-row[open] summary::before {
+    transform: rotate(90deg);
+}
+
+.dept-name {
+    flex: 1;
+    min-width: 80px;
+    font-weight: 600;
+}
+
+.dept-numbers {
+    font-size: 13px;
+    color: var(--color-text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.dept-numbers strong {
+    color: var(--color-text);
+}
+
+.dept-row .stats-table {
+    margin: 0 0 10px 24px;
+    width: calc(100% - 24px);
+}
+
+/* 준비표에서 다 쓴(남은 양 0) 약 */
+.stats-table tr.is-used-up td:nth-child(5) {
+    color: var(--color-danger);
+    font-weight: 700;
+}
+
+/* ---------- 목록 한 줄 (약품·분류, 이후 창고·미션 재고도 같이 쓴다) ---------- */
+
+.admin-filters {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 14px;
+}
+
+.admin-filters .field-input {
+    margin-bottom: 0;
+}
+
+@media (max-width: 640px) {
+    .admin-filters {
+        grid-template-columns: 1fr 1fr;
+    }
+    .admin-filters input {
+        grid-column: 1 / -1;
+    }
+}
+
+.admin-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.admin-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px 10px;
+    padding: 10px 12px;
+    background: var(--color-bg);
+    border-radius: 12px;
+}
+
+.admin-row-main {
+    flex: 1;
+    min-width: 160px;
+}
+
+.admin-row-title {
+    display: block;
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.admin-row-sub {
+    display: block;
+    font-size: 13px;
+    color: var(--color-text-muted);
+}
+
+.admin-row-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.admin-row-actions {
+    display: flex;
+    gap: 4px;
+}
+
+/* [삭제] - 글자는 작게, 터치 영역은 44px */
+.row-delete {
+    min-height: 44px;
+    padding: 0 10px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--color-danger);
+}
+
+/* ---------- 분류 두 칸 ---------- */
+.category-columns {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+}
+
+@media (max-width: 640px) {
+    .category-columns {
+        grid-template-columns: 1fr;
+    }
+}
+
+.category-column-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.category-column-head .form-section-title {
+    margin: 0;
+}
+
+/* 모달 안의 토글 한 줄 */
+.modal-body .toggle-row {
+    margin: 4px 0 8px;
+}
+
+/* ---------- 창고·미션 재고 줄의 수량 칸 ---------- */
+.admin-row-qty {
+    min-width: 96px;
+    text-align: right;
+}
+
+.admin-row-qty-main {
+    display: block;
+    font-size: 17px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+.admin-row-qty-main small {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--color-text-muted);
+}
+
+.admin-row-qty-label {
+    display: block;
+    font-size: 11px;
+    color: var(--color-text-muted);
+}
+
+.admin-row.is-empty .admin-row-qty-main {
+    color: var(--color-danger);
+}
+
+.admin-row.is-settled {
+    opacity: 0.65;
+}
+
+/* 줄 안의 글자 버튼 (이력 등) - 터치 영역 44px */
+.row-link {
+    min-height: 44px;
+    padding: 0 8px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--color-accent);
+}
+
+/* ---------- 보정 이력 (모달) ---------- */
+.history-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 50vh;
+    overflow-y: auto;
+    list-style: none;
+}
+
+.history-list li {
+    padding: 10px 12px;
+    background: var(--color-bg);
+    border-radius: 10px;
+    font-size: 14px;
+}
+
+.history-change {
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+.history-meta {
+    display: block;
+    font-size: 12px;
+    color: var(--color-text-muted);
+}
+
+/* 보정 모달의 "지금 잔량" 줄 */
+.adjust-current {
+    margin-bottom: 14px;
+    font-size: 15px;
+}
+
+.adjust-current strong {
+    font-size: 20px;
+    font-variant-numeric: tabular-nums;
+}
+
+/* 한 덩어리로 붙어 있어야 하는 글자 (줄바꿈은 덩어리 사이에서만) */
+.nowrap {
+    white-space: nowrap;
+}
+
+.modal-body .adjust-current strong {
+    color: var(--color-text);
+}
+
+/* 한꺼번에 정산 표의 기부량 칸 */
+.bulk-settle-table .field-input {
+    width: 88px;
+    margin: 0;
+    padding: 8px 10px;
+    text-align: right;
+}
+
+/* ---------- 설정 탭 - 현장 시간대 ---------- */
+.tz-clock {
+    margin: 16px 0 20px;
+    padding: 18px 20px;
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+}
+
+.tz-clock-main {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    column-gap: 14px;
+    row-gap: 2px;
+    margin-bottom: 12px;
+}
+
+.tz-clock-label {
+    flex-basis: 100%;
+    font-size: 13px;
+    color: var(--color-text-muted);
+}
+
+.tz-clock-date,
+.tz-clock-time {
+    font-size: 26px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+}
+
+.tz-clock-date small {
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--color-text-muted);
+}
+
+.tz-clock-time {
+    color: var(--color-accent);
+}
+
+.tz-clock-rows {
+    display: grid;
+    gap: 6px;
+    margin: 0;
+    font-size: 14px;
+}
+
+.tz-clock-rows > div {
+    display: flex;
+    gap: 12px;
+}
+
+.tz-clock-rows dt {
+    flex: none;
+    width: 84px;
+    color: var(--color-text-muted);
+}
+
+.tz-clock-rows dd {
+    margin: 0;
+    font-variant-numeric: tabular-nums;
+}
+
+.tz-clock-rows .is-ok dd {
+    color: var(--color-success);
+}
+
+.tz-clock-rows .is-warn dd {
+    color: var(--color-danger);
+    font-weight: 600;
+}
+
+/* 시간대 고르기 + 저장 - 넓으면 한 줄, 폰에서는 쌓인다 */
+.tz-form {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 12px;
+}
+
+.tz-form-field {
+    flex: 1 1 240px;
+    min-width: 0;
+}
+
+.tz-form-field .field-input {
+    margin-bottom: 0;
+}
+
+.tz-updated {
+    margin-top: 10px;
+    font-size: 13px;
+    color: var(--color-text-muted);
+}

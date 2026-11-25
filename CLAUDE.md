@@ -46,6 +46,7 @@ missionary_emr/
 │   ├─ models.py            모든 도메인 모델
 │   ├─ permissions.py       role_permission() 팩토리, get_active_memberships(), 본인 배정·처방 확인용 클래스/함수
 │   ├─ pagination.py        FlexiblePagination (기본 20, ?page_size= 최대 500)
+│   ├─ middleware.py        SiteTimezoneMiddleware - 요청마다 현장 시간대(SiteConfig)를 timezone.activate()
 │   ├─ templatetags/static_version.py   {% static_v %} - 정적 파일 주소에 ?v=수정시각 (캐시 자동 갱신)
 │   ├─ serializers.py / views.py / urls.py / admin.py
 ├─ management/              관리자 전용 API (모델 없음, clinic 모델을 import해서 사용)
@@ -56,10 +57,10 @@ missionary_emr/
 │   ├─ roles/               info.html, reception.html, clinical.html, pharmacy.html, admin.html
 │   └─ partials/            nav.html, modal.html, patient_intake_modal.html
 ├─ static/
-│   ├─ css/                 base.css(토큰·공통 컴포넌트), login, nav, page, modal, info, reception, clinical, pharmacy(조제지 인쇄 포함)
-│   ├─ js/                  api.js, common.js(escapeHtml·showToast·patientMeta·doctorLabel·byId),
+│   ├─ css/                 base.css(토큰·공통 컴포넌트), login, nav, page, modal, info, reception, clinical, pharmacy(조제지 인쇄 포함), admin
+│   ├─ js/                  api.js(apiFetch·apiDownload), common.js(escapeHtml·showToast·patientMeta·doctorLabel·byId·todayStr·dateTimeLabel),
 │   │                       nav.js, modal.js, login.js, select_mission.js,
-│   │                       patient-intake.js, info.js, reception.js, clinical.js, pharmacy.js
+│   │                       patient-intake.js, info.js, reception.js, clinical.js, pharmacy.js, admin.js
 │   └─ fonts/               Pretendard-{Regular,Medium,SemiBold,Bold}.woff2
 └─ db/emr.db                (gitignore)
 ```
@@ -101,6 +102,12 @@ superuser는 백엔드 권한을 전부 통과하므로 nav에서 모든 역할 
 - `PrescriptionDrug`: dose_per_intake × frequency_per_day × duration_days로 `quantity`를 `save()`에서 자동 계산한다. 세 값이 없으면 quantity를 직접 입력한 값 그대로 쓴다.
 - `DrugBatch`는 창고 전체 재고(미션과 무관, source = 후원/현지/구매/현지구매/기타 + source_detail), `MissionStock`은 미션에 챙겨간 몫이다. **처방 시 재고 차감은 `MissionStock.remaining_qty`에서** 일어난다.
   정산: `donated_qty`를 입력하면 `remaining_qty − donated_qty`를 `DrugBatch.remaining_qty`에 합산하고 `is_settled=True`.
+  **재고 규칙(관리자 API)**: 배치 입고 = 창고 잔량 = 입고량(입고량 수정 시 잔량도 같은 만큼) / 미션 배분 = 창고 − 배분량, 현장 = 배분량 /
+  배분량 수정 = 차이만큼 창고↔현장(정산 전, 현장 잔량 안에서) / 배분 삭제 = 현장 잔량을 창고로(조제에 쓰였거나 정산했으면 불가) /
+  정산 = 창고 + (현장 잔량 − 기부량), 두 번 정산 불가. 같은 미션에 같은 배치는 한 번만 배분(더 챙기면 배분량 수정).
+  창고 잔량은 일반 PATCH로 못 바꾸고, 실사 차이는 `adjust`(사유 필수)로만 고친다 → `StockAdjustment`(전→후·사유·누가·언제)에 이력이 남는다. 현장 잔량도 정산 전이면 같은 방식.
+- `StockAdjustment`: 재고 직접 보정 이력. `drugbatch` 또는 `mission_stock` 중 하나. 배분·정산 같은 자동 이동은 남기지 않는다.
+- `SiteConfig`: 현장 설정, 행 하나(pk=1, `SiteConfig.load()`). `time_zone`(IANA 이름, 비면 `settings.TIME_ZONE`), `updated_by`, `updated_at`.
 
 **주요 업무 규칙**
 - "접수 대기" = 오늘 방문 중 `chief_complaint=''`, "접수 완료" = 주호소가 입력된 방문.
@@ -144,7 +151,7 @@ superuser는 백엔드 권한을 전부 통과하므로 nav에서 모든 역할 
 | 처방약 수정 | `PATCH prescription-drugs/<pk>/` = 약국팀용(수량만 믿고 재계산 안 함), `PATCH/DELETE prescription-drugs/<pk>/clinical/` = 진료팀용(재계산됨) |
 | 조회용 | `GET departments/`, `drug-categories1/`, `drug-categories2/`, `drugs/` (진료팀 약 검색, MissionStock 기준, `?search=&cat1=&cat2=`) |
 | 약국 | `GET mission-stocks/`, `GET prescription-drugs/stats/?period=day&date= \| ?period=mission`(수령된 약만: summary·drugs + 미션 기준 runway), `GET visits/pharmacy-queue/`(오늘, 등록번호순), `GET visits/pharmacy-done/`(오늘 수령, 최신순), `GET visits/<id>/dispense-options/`, `POST visits/<id>/dispense/` `{items:[{prescription_drug, mission_stock}]}`, `POST visits/<id>/undispense/`, `POST visits/print-claim/` `{ids}` → `{claimed}` (조제 대기·조제 화면 응답에 `slip_printed_at`, `stock_issues`) |
-| 관리자 `manage/` | `GET missions/`, `GET visits/stats/?mission=`, `GET mission-stocks/export/?mission=`, 그리고 라우터 CRUD: `drug-categories1`, `drug-categories2`, `drugs`, `drug-batches`, `mission-stocks` (`POST mission-stocks/<id>/settle/`) |
+| 관리자 `manage/` | `GET missions/`(`is_active`), `GET visits/stats/?mission=`(진료과별 환자 수·전체 방문·실제 환자, 진료 완료 기준), `GET drug-stats/?mission=`(분류별·진료과별 사용량, 다음 미션 준비표, 수령 기준), `GET mission-stocks/export/?mission=`(통계 시트 4개 + `재고-분류` 시트), `GET stock-adjustments/?drugbatch=\|mission_stock=`, `GET/PATCH site-config/` `{time_zone}`(서버 기준 `server_today`·`server_time`·`server_wall`·`utc_offset`, 시각 글자는 서버가 현장 시간대로 만든다), 그리고 라우터 CRUD: `drug-categories1`, `drug-categories2`, `drugs`(`?search=&cat1=&cat2=`), `drug-batches`(`?drug=&search=`, `POST <id>/adjust/`), `mission-stocks`(`?mission=&search=`, `POST <id>/adjust/`, `POST <id>/settle/`, `POST settle-bulk/` `{items:[{id, donated_qty}]}` 하나라도 틀리면 전부 취소). 사용 중인 항목 삭제는 400 |
 
 권한 클래스(`clinic/permissions.py`): `IsInfoTeam`, `IsReceptionTeam`, `IsClinicalTeam`, `IsPharmacyTeam`와 조합용(`IsInfoOrReceptionTeam` 등).
 모두 `role_permission(*역할이름)` 팩토리로 만들며, **superuser는 항상 통과**한다. 역할 이름 문자열('안내팀', '접수팀', '진료팀', '약국팀')은 DB의 `Role.name`과 정확히 같아야 한다.
@@ -175,11 +182,14 @@ POST처럼 대상 객체가 없는 요청은 뷰의 `perform_create`에서 `owns
 
 **프론트엔드**
 - API 호출은 반드시 `static/js/api.js`의 `apiFetch()`를 거친다(토큰 부착, 401이면 로그인 화면으로, 오류 메시지 가공).
+  엑셀처럼 파일을 받을 때는 `apiDownload(path, 기본파일명)`을 쓴다(파일명은 서버의 `filename*=UTF-8''…`).
+- 요약 숫자 칸(`.stats-summary` / `.stat-tile`)과 통계 표(`.stats-table`, 숫자 칸 `.stats-qty`, 열이 많으면 `.table-scroll`로 감싸 폰에서 가로 스크롤)는 `base.css` 공용이다.
 - 사람이 입력한 문자열을 `innerHTML`에 넣을 때는 `escapeHtml()`을 거친다.
-- 여러 페이지가 쓰는 화면 도우미(`escapeHtml`, `showToast`, `patientMeta`, `doctorLabel`, `byId`)는 `common.js`에만 둔다. 페이지 js에 다시 정의하지 않는다 — 일반 `<script>`끼리는 `const`·`let` 이름을 공유해서, `const byId`가 두 번 있으면 페이지 전체가 멈춘다.
+- 여러 페이지가 쓰는 화면 도우미(`escapeHtml`, `showToast`, `patientMeta`, `doctorLabel`, `byId`, `todayStr`, `dateTimeLabel`)는 `common.js`에만 둔다. 페이지 js에 다시 정의하지 않는다 — 일반 `<script>`끼리는 `const`·`let` 이름을 공유해서, `const byId`가 두 번 있으면 페이지 전체가 멈춘다.
+- 탭(`.tab-bar` / `.tab-button` / `.active`, 애플 세그먼트 모양)은 `base.css` 공용이다(약국·관리자). 페이지 js에서 탭 버튼을 찾을 때는 `#main-tabs` 안에서만 찾는다(기간 선택처럼 같은 모양의 다른 버튼과 섞이지 않게).
 - 디자인 토큰(색·반경·그림자)은 `base.css`의 `:root` 변수만 쓴다. 공통 컴포넌트(`.card`, `.field-input`, `.btn-primary`, `.toggle`, `.queue-item` 등)는 `base.css` 또는 공용 css에서 재사용하고 페이지마다 복제하지 않는다.
 - 디자인 톤: **애플 스타일** — 여백 넉넉, 은은한 그림자, 둥근 모서리, 깔끔한 타이포. 등록번호만 점선 테두리 + `tabular-nums`로 "번호표" 느낌을 낸다. 못생기게 만들지 않는다.
-- 확인·입력용 팝업은 브라우저 기본 `alert/prompt/confirm` 대신 `openModal()` / `closeModal()`과 `showToast()`를 쓴다.
+- 확인·입력용 팝업은 브라우저 기본 `alert/prompt/confirm` 대신 `openModal()` / `closeModal()`과 `showToast()`를 쓴다. 보기만 하는 모달은 `openModal({..., hideCancel: true})`.
 - 목록을 폴링으로 갱신할 때: 응답을 JSON 문자열로 비교해 바뀐 경우에만 다시 그리고, 입력창에 포커스가 있으면 갱신을 미룬다.
 - 목록 안에 펼쳐지는 패널(접수/진료)은 `#panel-dock`을 "집"으로 둔다. 목록을 `innerHTML`로 다시 그리기 전에 패널을 dock으로 옮겨 두지 않으면 패널이 사라진다.
 - `hidden` 속성이 `display:flex` 클래스에 덮이지 않도록 `base.css`에 `[hidden] { display: none !important; }`가 있다. 지우지 않는다.
@@ -221,14 +231,27 @@ POST처럼 대상 객체가 없는 요청은 뷰의 `perform_create`에서 `owns
 ## 10. 앞으로 할 일
 
 **다음 작업**
+- 현장 투입 전 정리 (`fix/` 브랜치, 2026-11-24 전체 리뷰 결과)
+  - 로그아웃·401 때 `localStorage.clear()` 대신 로그인 키(토큰·이름·권한·미션)만 지운다 - 지금은 약국 출력 PC의 [자동 출력]·용지 설정까지 지워진다.
+    토큰 8시간 만료는 그대로 두고(결정: 다시 로그인), 만료되면 출력 PC가 모르고 지나가지 않게 화면에 크게 알린다.
+  - 하루 목록 `page_size=200` → 500 (접수 완료 `reception.js`, 조제 대기·수령 완료 `pharmacy.js`, 접수 대기도 같이).
+  - `patient-intake.js`의 `alert()` → `showToast`, `piEscape` → `escapeHtml`(common.js), `info.html`에 `common.js` 추가, `info.js` escape·인라인 style 정리.
+  - 엑셀 시트 이름에서 `/ ? * [ ] :`를 빼기(지금은 그런 분류 이름이 있으면 export 500).
+  - 미션 재고 배분 삭제 시 보정 이력이 CASCADE로 지워짐 → 보정 이력이 있으면 삭제를 막을지 정한다.
 - 약국 통계 탭의 재고 소진 예상: 약을 정해진 만큼만 가져가 현지에서 더 구하기 어려워, 미션 중에는 쓸모가 적을 수 있다.
   현장 피드백을 받아 필요 없으면 뺀다(다음 미션 계획용 정보는 관리자 '다음 미션 준비표'로).
 - 조제지 실제 프린터 출력 확인: 아직 못 해 봤다(영수증 프린터 예정, 80mm·58mm·A4는 크롬 PDF로만 확인). 현장 프린터가 정해지면 `--kiosk-printing`과 드라이버 용지·자르기 설정을 같이 확인한다.
-- 관리자 프론트엔드 (미션 탭 통계, 약품/배치/미션재고 CRUD 화면, 정산, export 다운로드)
+- 관리자 프론트엔드 (`feature/frontend-admin`) — 1단계 백엔드 정리 완료(재고 규칙·보정 이력·통계·엑셀)
+  - 2단계 화면 골격 완료: 탭 [통계 | 미션 재고 | 창고 재고 | 약품 | 설정], 미션 칩(통계·미션 재고 탭에서만, 진행중 먼저, 고른 미션 기억)
+  - 3단계 통계 탭 완료: 요약 4칸, 진료과 × 소아/성인 × 성별 표, 약 분류(분류/세부 분류)·진료과별(펼치면 약 목록) 사용량, 다음 미션 준비표, 엑셀 다운로드(`apiDownload`)
+  - 4단계 약품 탭 완료: 약품 검색·분류 필터·추가·수정·삭제(모달), 분류·세부 분류 추가·수정·삭제(분류는 복용스케줄 입력 여부). 목록 한 줄은 `.admin-row`, 삭제 확인은 `confirmDelete()`
+  - 5-1단계 창고 재고 탭 완료: 입고 추가·수정·삭제(약품 분류별 선택), 출처·잔량 필터, 잔량 보정(`openAdjustModal`)·보정 이력(`openHistoryModal`) - 두 모달은 미션 재고와 공용
+  - 5-2단계 미션 재고 탭 완료: 배분 추가(창고에 남은·이 미션에 없는 배치), 배분량 수정, 현장 잔량 보정·이력, 정산(한 줄 / 한꺼번에 - 기부량만 입력, 진행 중 미션이면 경고), 정산·상태·분류 필터
+  - 6단계 설정 탭 완료: 현장 시간대 선택(한국·캄보디아·마다가스카르·태국·몽골 + 기타 직접 입력), 서버 기준 오늘·지금 시각·UTC 차이, 이 기기 시계와 비교(2분 넘게 다르면 경고), 변경은 확인 모달(진행 중 미션이면 경고)
+  - 남은 것: 관리자 PR
+  - 미션 생성과 계정 역할 배정(`MissionMembership`)은 Django admin에 둔다.
   - 약 통계(미션 선택 가능, 엑셀 포함): 분류(cat1·cat2)별·진료과별 사용량, 그리고 다음 미션 준비표(약마다 챙겨 간 양·쓴 양·남은 양·하루 평균).
     약국 화면은 "오늘 일하는 화면", 관리자는 "돌아보고 다음 미션을 계획하는 화면"으로 나눈다. 약국팀장도 필요하면 같은 API를 약국 탭에 붙인다.
-  - 시간대 설정 화면: `SiteConfig`(행 1개, `time_zone`) 모델 + 요청마다 `timezone.activate()`하는 미들웨어 + 관리자 화면에서 선택.
-    같은 화면에 "서버 기준 오늘 날짜·현재 시각·시간대"를 보여줘 설정 실수를 바로 알아보게 한다. 미션 중 변경은 확인 모달.
 - 약품 리스트 엑셀(`약품_리스트_아가페_2026_약품분류용1.xlsx`)을 `Drug`/`DrugCategory`/`DrugBatch`로 가져오는 `import_drugs` 관리 커맨드 (시트: 약속처방, 경구, 외용약, 비타민, 주사제, 소아, 추가약)
 - 진료 차트 양식(`고객등록카드(캄보디아) - 2025.hwp`)에 있는 치과 차트(Primary/Permanent teeth) 모델과 화면
 - 수술팀 워크플로우, 통계 문서 저장(PDF/엑셀) 같은 부가 기능
@@ -247,8 +270,10 @@ POST처럼 대상 객체가 없는 요청은 뷰의 `perform_create`에서 `owns
 
 - **코드가 기준이다.** Notion에 옮긴 설계 문서(`EMR_DB_설계`, `EMR_페이지_기능명세`, `EMR_API_공통구조`, `EMR_API_명세`)는 일부 오래됐다. 문서에 없고 코드에만 있는 것: `MissionStock`/`DrugBatch` 분리와 `source_detail`, `uses_dosage_schedule`, `User.primary_department`, 접수 대기 기준(맥박 → 주호소), 배정 취소 DELETE, 진료팀용 처방약 수정 URL,
   `VisitDepartment.assigned_by`/`done_at`, 처방 수정·삭제 API, 진료 완료 규칙, 진료팀 본인 배정 권한.
-- **시간대**: `settings.TIME_ZONE` 기본값은 개발 장소인 `Asia/Seoul`이다. 현장에서는 `config/local_settings.example.py`를 `config/local_settings.py`로 복사해 그 나라 시간대(캄보디아 `Asia/Phnom_Penh`)로 바꾼다(git 제외 파일).
-  깜빡하면 한국 시간으로 돌아가서 시각 표시가 어긋나고 밤늦게 날짜가 넘어간다. 시각은 DB에 UTC로 저장되므로 시간대를 바꿔도 지난 기록은 틀어지지 않는다.
+- **시간대**: 현장 시간대는 관리자 [설정] 탭에서 고른다(`SiteConfig.time_zone`, `SiteTimezoneMiddleware`가 요청마다 켠다). 이 값이 `settings.TIME_ZONE`보다 우선한다.
+  관리자 화면에서 아직 안 골랐을 때만 `settings.TIME_ZONE`(기본 `Asia/Seoul`, 또는 `config/local_settings.py`)을 쓴다. 현장에 도착하면 설정 탭에서 "서버 기준 오늘·지금 시각"부터 확인한다.
+  깜빡하면 한국 시간으로 돌아가서 시각 표시가 어긋나고 밤늦게 날짜가 넘어간다. 시각은 DB에 UTC로 저장되므로 시간대를 바꿔도 지난 기록은 틀어지지 않는다(`visit_date`는 등록할 때의 날짜 그대로).
+  화면의 유통기한 "(지남)"·기본 날짜는 기기 날짜(`todayStr()`)를 쓰므로 기기 시계도 맞아야 한다 - 설정 탭이 기기 시계와 서버 시각의 차이를 보여준다.
 - **`PrescriptionDrug.save()` 자동 계산**: PATCH로 `quantity`만 보내도 세 값(1회량·횟수·일수)이 있으면 덮어쓴다. 약국팀 수정은 `PrescriptionDrugUpdateSerializer.update()`에서 `instance.save(skip_recalculate=True)`를 직접 호출한다.
   `serializer.save(skip_recalculate=True)`처럼 kwarg로 넘기면 DRF가 데이터로 취급해서 동작하지 않는다.
 - `POST /visits/` 응답에는 `assignments`가 없다. 방문을 만든 직후 그 응답을 접수 화면 상태에 넣을 때 `assignments = []`를 직접 채워야 한다.
