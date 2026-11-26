@@ -154,6 +154,26 @@ class DrugViewSet(ProtectedDeleteMixin, viewsets.ModelViewSet):
             qs = qs.filter(cat2_id=params['cat2'])
         return qs
 
+    @action(detail=False, methods=['get'], url_path='category-tree')
+    def category_tree(self, request):
+        """
+        약품 탭 필터 선택지 - 약품이 있는 분류와 그 안의 세부 분류, 각각 약품 수.
+        [{id, name, count, cat2: [{id, name, count}, ...]}, ...] 이름순
+        """
+        rows = (
+            Drug.objects.values('cat1_id', 'cat1__name', 'cat2_id', 'cat2__name')
+            .annotate(count=Count('id'))
+        )
+        tree = {}
+        for r in rows:
+            cat1 = tree.setdefault(r['cat1_id'], {'id': r['cat1_id'], 'name': r['cat1__name'], 'count': 0, 'cat2': []})
+            cat1['count'] += r['count']
+            cat1['cat2'].append({'id': r['cat2_id'], 'name': r['cat2__name'], 'count': r['count']})
+        result = sorted(tree.values(), key=lambda c: c['name'])
+        for cat1 in result:
+            cat1['cat2'].sort(key=lambda c: c['name'])
+        return Response(result)
+
 
 # =====================================================
 # 창고 재고 (DrugBatch) - 잔량은 배분·정산으로 자동, 실사 차이는 adjust로 직접 보정

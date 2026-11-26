@@ -317,6 +317,7 @@ function confirmDelete({ title, name, path, onDone }) {
 let cat1List = [];              // 분류 [{id, name, uses_dosage_schedule}]
 let cat2List = [];              // 세부 분류 [{id, name}]
 let drugList = [];              // 지금 검색 조건의 약품
+let drugTree = [];              // 약품이 있는 분류 → 세부 분류 (약품 필터 선택지, 개수 포함)
 let drugRequestSeq = 0;         // 검색어를 빨리 바꿀 때 늦게 온 예전 응답을 버리기 위한 번호
 let drugSearchTimer = null;
 
@@ -353,10 +354,43 @@ function renderCategories() {
     byId('cat2-list').innerHTML = cat2List.length === 0
         ? emptyRowHtml('세부 분류가 없습니다.')
         : cat2List.map((c) => categoryRowHtml(c, 'cat2')).join('');
+}
 
-    // 약품 필터 선택지 (고른 값은 유지)
-    byId('drug-filter-cat1').innerHTML = optionsHtml(cat1List, byId('drug-filter-cat1').value, '분류 전체');
-    byId('drug-filter-cat2').innerHTML = optionsHtml(cat2List, byId('drug-filter-cat2').value, '세부 분류 전체');
+// ----- 약품 필터 (분류 → 세부 분류) -----
+// 약품이 있는 분류만 개수와 함께 보이고, 분류를 고르면 세부 분류는 그 분류 안의 것만 (진료팀 처방 화면과 같은 방식)
+
+async function loadDrugTree() {
+    try {
+        drugTree = await apiFetch('/manage/drugs/category-tree/');
+    } catch (err) {
+        console.error(err);
+        return;
+    }
+    renderDrugFilters();
+}
+
+function renderDrugFilters() {
+    const option = (c, selected) =>
+        `<option value="${c.id}"${String(c.id) === String(selected) ? ' selected' : ''}>${escapeHtml(c.name)} (${c.count})</option>`;
+
+    const cat1Select = byId('drug-filter-cat1');
+    const cat1Value = drugTree.some((c) => String(c.id) === cat1Select.value) ? cat1Select.value : '';
+    cat1Select.innerHTML = '<option value="">분류 전체</option>' + drugTree.map((c) => option(c, cat1Value)).join('');
+
+    // 분류를 골랐으면 그 분류의 세부 분류, 전체면 모든 분류의 세부 분류를 이름별로 합친다
+    const chosen = drugTree.find((c) => String(c.id) === cat1Value);
+    let list = chosen ? chosen.cat2 : [];
+    if (!chosen) {
+        const merged = new Map();
+        drugTree.forEach((c) => c.cat2.forEach((x) => {
+            const prev = merged.get(x.id);
+            merged.set(x.id, { ...x, count: (prev ? prev.count : 0) + x.count });
+        }));
+        list = [...merged.values()].sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+    }
+    const cat2Select = byId('drug-filter-cat2');
+    const cat2Value = list.some((x) => String(x.id) === cat2Select.value) ? cat2Select.value : '';
+    cat2Select.innerHTML = '<option value="">세부 분류 전체</option>' + list.map((x) => option(x, cat2Value)).join('');
 }
 
 async function loadCategories() {
@@ -419,6 +453,7 @@ async function saveCategory(level, category) {
     closeModal();
     showToast(category ? '저장했습니다.' : `${name}을(를) 추가했습니다.`);
     await loadCategories();
+    loadDrugTree();
     loadDrugs();    // 약품 목록의 분류 이름도 바뀌었을 수 있다
 }
 
@@ -549,6 +584,7 @@ async function saveDrug(drug) {
     }
     closeModal();
     showToast(drug ? '저장했습니다.' : `${body.name}을(를) 추가했습니다.`);
+    loadDrugTree();     // 분류별 개수가 바뀌었을 수 있다
     loadDrugs();
 }
 
@@ -560,7 +596,10 @@ byId('drug-list').addEventListener('click', (e) => {
     if (!drug) return;
     if (action === 'edit') openDrugModal(drug);
     if (action === 'delete') {
-        confirmDelete({ title: '약품 삭제', name: drug.name, path: `/manage/drugs/${drug.id}/`, onDone: loadDrugs });
+        confirmDelete({
+            title: '약품 삭제', name: drug.name, path: `/manage/drugs/${drug.id}/`,
+            onDone: () => { loadDrugTree(); loadDrugs(); },
+        });
     }
 });
 
@@ -569,7 +608,10 @@ byId('drug-search').addEventListener('input', () => {
     clearTimeout(drugSearchTimer);
     drugSearchTimer = setTimeout(loadDrugs, 300);   // 글자마다 요청하지 않게 잠깐 기다린다
 });
-byId('drug-filter-cat1').addEventListener('change', loadDrugs);
+byId('drug-filter-cat1').addEventListener('change', () => {
+    renderDrugFilters();    // 세부 분류 선택지를 그 분류 것만으로 (고른 세부 분류가 없으면 전체로)
+    loadDrugs();
+});
 byId('drug-filter-cat2').addEventListener('change', loadDrugs);
 
 TAB_LOADERS.drugs = async () => {
@@ -578,6 +620,7 @@ TAB_LOADERS.drugs = async () => {
     } catch (err) {
         byId('cat1-list').innerHTML = `<p class="empty-text is-error">${escapeHtml(err.message)}</p>`;
     }
+    await loadDrugTree();   // 필터 선택지를 먼저 채우고 약품을 불러온다
     loadDrugs();
 };
 

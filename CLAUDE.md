@@ -122,6 +122,7 @@ superuser는 백엔드 권한을 전부 통과하므로 nav에서 모든 역할 
 - 완료된 배정의 처방은 서버에서도 작성·수정·삭제를 막는다. 고치려면 [완료 취소] → 수정. 완료 취소는 약국 수령(`is_dispensed`) 전까지만 된다.
   vitals는 다른 의사가 아직 진료 중일 수 있어 완료 후에도 서버는 막지 않고 화면에서만 잠근다.
 - 같은 환자를 본 다른 의사의 처방은 **진료 완료된 것만** 읽기 전용으로 보여준다(한 환자를 동시에 진료할 일은 없다).
+- 처방할 때 고를 수 있는 약은 이번 미션에 **정산 전이고 현장 잔량이 남은** 배치가 있는 약뿐이다(`prescribable_drugs()`). 분류·세부 분류 선택지도 그 약들에 있는 것만 나오고, 분류를 고르면 그 안의 세부 분류만 보인다.
 - 약국 대기 목록은 **환자(visit) 단위**다. 오늘 방문 중 배정된 모든 `VisitDepartment`가 완료되고 미수령 처방이 있는 방문만 나오며, 수령 처리는 그 환자의 모든 처방을 한 번에 `is_dispensed=True`, `dispensed_at=지금`으로 만든다.
 - 조제할 때 같은 약의 배치가 여러 개면 약국팀이 직접 고른다(자동 FIFO 아님). 화면은 처방 수량만큼 남은 배치가 하나뿐일 때만 미리 고르고,
   잔량이 모자란 배치는 못 고르게 막는다. 유통기한이 지난 배치는 "(지남)" 표시만 하고 고를 수 있다(현장 판단에 맡김). 고른 배치는 `PrescriptionDrug.dispensed_stock`(PROTECT)에 남는다.
@@ -151,9 +152,9 @@ superuser는 백엔드 권한을 전부 통과하므로 nav에서 모든 역할 
 | 배정 | `GET/POST visit-departments/` (`?is_done=false\|true`), `GET visit-departments/wait-counts/`(안내·접수·진료팀), `GET/PATCH/DELETE visit-departments/<pk>/` (PATCH `{is_done: true\|false}` = 진료 완료/완료 취소) |
 | 처방 | `GET/POST prescriptions/` (`?visit_department=` 내 처방, `?visit=` 다른 의사 완료 처방), `PATCH/DELETE prescriptions/<pk>/` (진료과·진료내용 수정 / 처방 삭제), `POST prescription-drugs/` |
 | 처방약 수정 | `PATCH prescription-drugs/<pk>/` = 약국팀용(수량만 믿고 재계산 안 함), `PATCH/DELETE prescription-drugs/<pk>/clinical/` = 진료팀용(재계산됨) |
-| 조회용 | `GET departments/`, `drug-categories1/`, `drug-categories2/`, `drugs/` (진료팀 약 검색, MissionStock 기준, `?search=&cat1=&cat2=`) |
+| 조회용 | `GET departments/`, `drug-categories1/`, `drug-categories2/`, `drugs/` (진료팀 약 검색 - 정산 전·잔량 있는 이번 미션 재고가 있는 약만, 약 하나에 한 줄·잔량은 배치 합계, `?search=&cat1=&cat2=`), `drugs/categories/` (그 약들에 있는 분류 → 세부 분류 트리, 처방 화면 선택지) |
 | 약국 | `GET mission-stocks/`, `GET prescription-drugs/stats/?period=day&date= \| ?period=mission`(수령된 약만: summary·drugs + 미션 기준 runway), `GET visits/pharmacy-queue/`(오늘, 등록번호순), `GET visits/pharmacy-done/`(오늘 수령, 최신순), `GET visits/<id>/dispense-options/`, `POST visits/<id>/dispense/` `{items:[{prescription_drug, mission_stock}]}`, `POST visits/<id>/undispense/`, `POST visits/print-claim/` `{ids}` → `{claimed}` (조제 대기·조제 화면 응답에 `slip_printed_at`, `stock_issues`) |
-| 관리자 `manage/` | `GET missions/`(`is_active`), `GET visits/stats/?mission=`(진료과별 환자 수·전체 방문·실제 환자, 진료 완료 기준), `GET drug-stats/?mission=`(분류별·진료과별 사용량, 다음 미션 준비표, 수령 기준), `GET mission-stocks/export/?mission=`(통계 시트 4개 + `재고-분류` 시트), `GET stock-adjustments/?drugbatch=\|mission_stock=`, `GET/PATCH site-config/` `{time_zone}`(서버 기준 `server_today`·`server_time`·`server_wall`·`utc_offset`, 시각 글자는 서버가 현장 시간대로 만든다), 그리고 라우터 CRUD: `drug-categories1`, `drug-categories2`, `drugs`(`?search=&cat1=&cat2=`), `drug-batches`(`?drug=&search=`, `POST <id>/adjust/`), `mission-stocks`(`?mission=&search=`, `POST <id>/adjust/`, `POST <id>/settle/`, `POST settle-bulk/` `{items:[{id, donated_qty}]}` 하나라도 틀리면 전부 취소). 사용 중인 항목 삭제는 400 |
+| 관리자 `manage/` | `GET missions/`(`is_active`), `GET visits/stats/?mission=`(진료과별 환자 수·전체 방문·실제 환자, 진료 완료 기준), `GET drug-stats/?mission=`(분류별·진료과별 사용량, 다음 미션 준비표, 수령 기준), `GET mission-stocks/export/?mission=`(통계 시트 4개 + `재고-분류` 시트), `GET stock-adjustments/?drugbatch=\|mission_stock=`, `GET drugs/category-tree/`(약품이 있는 분류 → 세부 분류, 개수), `GET/PATCH site-config/` `{time_zone}`(서버 기준 `server_today`·`server_time`·`server_wall`·`utc_offset`, 시각 글자는 서버가 현장 시간대로 만든다), 그리고 라우터 CRUD: `drug-categories1`, `drug-categories2`, `drugs`(`?search=&cat1=&cat2=`), `drug-batches`(`?drug=&search=`, `POST <id>/adjust/`), `mission-stocks`(`?mission=&search=`, `POST <id>/adjust/`, `POST <id>/settle/`, `POST settle-bulk/` `{items:[{id, donated_qty}]}` 하나라도 틀리면 전부 취소). 사용 중인 항목 삭제는 400 |
 
 권한 클래스(`clinic/permissions.py`): `IsInfoTeam`, `IsReceptionTeam`, `IsClinicalTeam`, `IsPharmacyTeam`와 조합용(`IsInfoOrReceptionTeam` 등).
 모두 `role_permission(*역할이름)` 팩토리로 만들며, **superuser는 항상 통과**한다. 역할 이름 문자열('안내팀', '접수팀', '진료팀', '약국팀')은 DB의 `Role.name`과 정확히 같아야 한다.
@@ -248,6 +249,7 @@ POST처럼 대상 객체가 없는 요청은 뷰의 `perform_create`에서 `owns
   - 2단계 화면 골격 완료: 탭 [통계 | 미션 재고 | 창고 재고 | 약품 | 설정], 미션 칩(통계·미션 재고 탭에서만, 진행중 먼저, 고른 미션 기억)
   - 3단계 통계 탭 완료: 요약 4칸, 진료과 × 소아/성인 × 성별 표, 약 분류(분류/세부 분류)·진료과별(펼치면 약 목록) 사용량, 다음 미션 준비표, 엑셀 다운로드(`apiDownload`)
   - 4단계 약품 탭 완료: 약품 검색·분류 필터·추가·수정·삭제(모달), 분류·세부 분류 추가·수정·삭제(분류는 복용스케줄 입력 여부). 목록 한 줄은 `.admin-row`, 삭제 확인은 `confirmDelete()`
+    약품 필터는 `manage/drugs/category-tree/`로 약품이 있는 분류만 개수와 함께 보이고, 분류를 고르면 그 안의 세부 분류만 나온다(추가·수정 모달의 세부 분류는 전부 - 새 약은 아직 안 쓰인 조합도 필요).
   - 5-1단계 창고 재고 탭 완료: 입고 추가·수정·삭제(약품 분류별 선택), 출처·잔량 필터, 잔량 보정(`openAdjustModal`)·보정 이력(`openHistoryModal`) - 두 모달은 미션 재고와 공용
   - 5-2단계 미션 재고 탭 완료: 배분 추가(창고에 남은·이 미션에 없는 배치), 배분량 수정, 현장 잔량 보정·이력, 정산(한 줄 / 한꺼번에 - 기부량만 입력, 진행 중 미션이면 경고), 정산·상태·분류 필터
   - 6단계 설정 탭 완료: 현장 시간대 선택(한국·캄보디아·마다가스카르·태국·몽골 + 기타 직접 입력), 서버 기준 오늘·지금 시각·UTC 차이, 이 기기 시계와 비교(2분 넘게 다르면 경고), 변경은 확인 모달(진행 중 미션이면 경고)
