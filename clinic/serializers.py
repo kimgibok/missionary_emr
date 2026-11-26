@@ -185,16 +185,20 @@ class DrugCategory2ReadSerializer(serializers.ModelSerializer):
 
 
 class DrugSearchSerializer(serializers.Serializer):
-    """진료팀 처방약 검색 - MissionStock 기준, drug 정보 nested"""
-    id = serializers.IntegerField()  # mission_stock id
-    drug_id = serializers.IntegerField(source='drugbatch.drug_id')
-    drug_name = serializers.CharField(source='drugbatch.drug.name')
-    ingredient = serializers.CharField(source='drugbatch.drug.ingredient')
-    usage = serializers.CharField(source='drugbatch.drug.usage')
-    cat1 = serializers.IntegerField(source='drugbatch.drug.cat1_id')
-    cat1_name = serializers.CharField(source='drugbatch.drug.cat1.name')
-    uses_dosage_schedule = serializers.BooleanField(source='drugbatch.drug.cat1.uses_dosage_schedule')
-    cat2 = serializers.IntegerField(source='drugbatch.drug.cat2_id')
+    """
+    진료팀 처방약 검색 - 약 하나에 한 줄. remaining_qty = 이번 미션에서 정산 전 배치의 현장 잔량 합계 (뷰의 annotate 값).
+    배치가 여러 개여도 처방은 약 단위로 하므로 합쳐서 보여준다 (어느 배치에서 꺼낼지는 약국이 고른다).
+    """
+    id = serializers.IntegerField()  # drug id
+    drug_id = serializers.IntegerField(source='id')
+    drug_name = serializers.CharField(source='name')
+    ingredient = serializers.CharField()
+    usage = serializers.CharField()
+    cat1 = serializers.IntegerField(source='cat1_id')
+    cat1_name = serializers.CharField(source='cat1.name')
+    uses_dosage_schedule = serializers.BooleanField(source='cat1.uses_dosage_schedule')
+    cat2 = serializers.IntegerField(source='cat2_id')
+    cat2_name = serializers.CharField(source='cat2.name')
     remaining_qty = serializers.IntegerField()
 
 

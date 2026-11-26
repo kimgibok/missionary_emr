@@ -6,7 +6,7 @@ from .views import (
     VisitDepartmentListCreateView, VisitDepartmentDetailView, DoctorWaitCountsView,
     PrescriptionDrugCreateView, DrugSearchView, DepartmentListView, PrescriptionListCreateView,
     PrescriptionDetailView, PrescriptionDrugClinicalUpdateView,
-    DrugCategory1ListView, DrugCategory2ListView,
+    DrugCategory1ListView, DrugCategory2ListView, DrugCategoryTreeView,
     MissionStockListView, PharmacyStatsView, PharmacyQueueView, PharmacyDoneView,
     DispenseOptionsView, DispenseView, UndispenseView, PrescriptionDrugUpdateView, PrintClaimView,
 )
@@ -34,6 +34,7 @@ urlpatterns = [
     path('prescription-drugs/<int:pk>/', PrescriptionDrugUpdateView.as_view(), name='prescription-drug-update'),
     path('prescription-drugs/<int:pk>/clinical/', PrescriptionDrugClinicalUpdateView.as_view(), name='prescription-drug-clinical-update'),
     path('drugs/', DrugSearchView.as_view(), name='drug-search'),
+    path('drugs/categories/', DrugCategoryTreeView.as_view(), name='drug-category-tree'),
     path('mission-stocks/', MissionStockListView.as_view(), name='mission-stock-list'),
     path('departments/', DepartmentListView.as_view(), name='department-list'),
     path('drug-categories1/', DrugCategory1ListView.as_view(), name='drug-category1-list'),

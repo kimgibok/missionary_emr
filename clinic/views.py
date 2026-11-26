@@ -12,7 +12,7 @@ from rest_framework.views import APIView
 
 from .models import (
     Patient, Visit, VisitDepartment, MissionMembership, Department, DrugCategory1, DrugCategory2,
-    Prescription, PrescriptionDrug, MissionStock,
+    Drug, Prescription, PrescriptionDrug, MissionStock,
 )
 from .permissions import (
     get_active_memberships,
@@ -263,32 +263,76 @@ class DrugCategory2ListView(generics.ListAPIView):
     permission_classes = [IsClinicalOrPharmacyTeam]
 
 
+def prescribable_drugs(mission):
+    """
+    진료팀이 처방할 수 있는 약 - 이번 미션에 정산 전이고 현장 잔량이 남은 배치가 하나라도 있는 약.
+    remaining_qty = 그 배치들의 잔량 합계. 정산했거나 다 쓴 배치는 처방 화면에 안 보인다.
+    (filter 다음 annotate라 같은 조건의 배치만 더한다)
+    """
+    return (
+        Drug.objects.filter(
+            batches__mission_stocks__mission=mission,
+            batches__mission_stocks__is_settled=False,
+            batches__mission_stocks__remaining_qty__gt=0,
+        )
+        .annotate(remaining_qty=Sum('batches__mission_stocks__remaining_qty'))
+        .select_related('cat1', 'cat2')
+    )
+
+
 class DrugSearchView(generics.ListAPIView):
-    """진료팀 처방약 검색 - 현재 미션의 MissionStock 기준 (?search=&cat1=&cat2=)"""
+    """진료팀 처방약 검색 - 처방할 수 있는 약(prescribable_drugs), 약 하나에 한 줄, 이름순 (?search=&cat1=&cat2=)"""
     serializer_class = DrugSearchSerializer
     permission_classes = [IsClinicalTeam]
 
     def get_queryset(self):
         mission = get_current_mission(self.request.user)
         if mission is None:
-            return MissionStock.objects.none()
+            return Drug.objects.none()
 
-        qs = MissionStock.objects.filter(mission=mission).select_related('drugbatch__drug')
-
+        qs = prescribable_drugs(mission)
         cat1 = self.request.query_params.get('cat1')
         cat2 = self.request.query_params.get('cat2')
         search = self.request.query_params.get('search')
 
         if cat1:
-            qs = qs.filter(drugbatch__drug__cat1_id=cat1)
+            qs = qs.filter(cat1_id=cat1)
         if cat2:
-            qs = qs.filter(drugbatch__drug__cat2_id=cat2)
+            qs = qs.filter(cat2_id=cat2)
         if search:
-            qs = qs.filter(
-                Q(drugbatch__drug__name__icontains=search) |
-                Q(drugbatch__drug__ingredient__icontains=search)
-            )
-        return qs
+            qs = qs.filter(Q(name__icontains=search) | Q(ingredient__icontains=search))
+        return qs.order_by('name', 'id')
+
+
+class DrugCategoryTreeView(APIView):
+    """
+    진료팀 처방 화면의 분류 선택지 - 처방할 수 있는 약에 실제로 있는 분류와 그 안의 세부 분류만.
+    [{id, name, uses_dosage_schedule, cat2: [{id, name}, ...]}, ...] 이름순
+    """
+    permission_classes = [IsClinicalTeam]
+
+    def get(self, request):
+        mission = get_current_mission(request.user)
+        if mission is None:
+            return Response([])
+
+        pairs = (
+            prescribable_drugs(mission)
+            .values('cat1_id', 'cat1__name', 'cat1__uses_dosage_schedule', 'cat2_id', 'cat2__name')
+            .distinct()
+        )
+        tree = {}
+        for p in pairs:
+            cat1 = tree.setdefault(p['cat1_id'], {
+                'id': p['cat1_id'], 'name': p['cat1__name'],
+                'uses_dosage_schedule': p['cat1__uses_dosage_schedule'], 'cat2': {},
+            })
+            cat1['cat2'][p['cat2_id']] = {'id': p['cat2_id'], 'name': p['cat2__name']}
+
+        result = sorted(tree.values(), key=lambda c: c['name'])
+        for cat1 in result:
+            cat1['cat2'] = sorted(cat1['cat2'].values(), key=lambda c: c['name'])
+        return Response(result)
 
 
 # =====================================================

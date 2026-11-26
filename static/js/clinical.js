@@ -27,6 +27,7 @@ let departments = [];           // 진료과 목록 (새 처방·처방 수정�
 let rxList = [];                // 내 배정의 처방 목록
 let editingRx = null;           // 편집 중인 처방 { id, items } - 한 번에 하나만
 let rxCart = [];                // 새 처방 장바구니
+let rxCategories = [];          // 처방할 수 있는 약의 분류 [{id, name, cat2: [{id, name}]}] - 새 처방의 분류 선택지
 
 
 // =====================================================
@@ -1020,19 +1021,37 @@ async function loadDepartments() {
     }
 }
 
+// 분류 선택지 = 지금 처방할 수 있는 약(정산 전·잔량 있는 미션 재고)에 실제로 있는 분류만.
+// 재고가 바뀌므로 새 처방 폼을 열 때마다 다시 받는다 (resetRxForm)
 async function loadDrugCategories() {
-    const optionsHtml = (list) => '<option value="">전체</option>' +
-        list.map((c) => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
     try {
-        const [cat1, cat2] = await Promise.all([
-            apiFetch('/drug-categories1/?page_size=50'),
-            apiFetch('/drug-categories2/?page_size=50'),
-        ]);
-        byId('rx-cat1').innerHTML = optionsHtml(cat1.results);
-        byId('rx-cat2').innerHTML = optionsHtml(cat2.results);
+        rxCategories = await apiFetch('/drugs/categories/');
     } catch (err) {
         console.error(err);
+        return;
     }
+    byId('rx-cat1').innerHTML = categoryOptionsHtml(rxCategories, byId('rx-cat1').value);
+    renderCat2Options();
+}
+
+function categoryOptionsHtml(list, selected) {
+    return '<option value="">전체</option>' + list.map((c) =>
+        `<option value="${c.id}"${String(c.id) === String(selected) ? ' selected' : ''}>${escapeHtml(c.name)}</option>`,
+    ).join('');
+}
+
+// 세부 분류 선택지 - 분류를 고르면 그 분류 안의 것만, 전체면 모든 분류의 세부 분류 (같은 것은 한 번)
+function renderCat2Options() {
+    const cat1 = rxCategories.find((c) => String(c.id) === byId('rx-cat1').value);
+    let list = cat1 ? cat1.cat2 : [];
+    if (!cat1) {
+        const seen = new Map();
+        rxCategories.forEach((c) => c.cat2.forEach((x) => seen.set(x.id, x)));
+        list = [...seen.values()].sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+    }
+    // 고른 세부 분류가 새 목록에 없으면 '전체'로
+    const selected = list.some((x) => String(x.id) === byId('rx-cat2').value) ? byId('rx-cat2').value : '';
+    byId('rx-cat2').innerHTML = categoryOptionsHtml(list, selected);
 }
 
 function resetRxForm() {
@@ -1044,6 +1063,7 @@ function resetRxForm() {
     byId('rx-drug-results').innerHTML = '';
     byId('rx-error').textContent = '';
     renderCart();
+    loadDrugCategories();   // 그 사이 정산·소진된 약의 분류가 빠지도록 다시 받는다
 }
 
 async function searchDrugs() {
@@ -1069,7 +1089,7 @@ async function searchDrugs() {
             <div class="patient-item">
                 <div>
                     <div class="patient-item-name">${escapeHtml(d.drug_name)}</div>
-                    <div class="patient-item-meta">${escapeHtml(d.cat1_name)} · ${escapeHtml(d.ingredient || '')} · 잔량 ${d.remaining_qty}</div>
+                    <div class="patient-item-meta">${escapeHtml(d.cat1_name)} › ${escapeHtml(d.cat2_name)} · ${escapeHtml(d.ingredient || '')} · 잔량 ${d.remaining_qty}</div>
                 </div>
                 <button class="btn-primary btn-inline" type="button" data-drug-id="${d.drug_id}">담기</button>
             </div>`).join('');
@@ -1179,7 +1199,10 @@ byId('rx-drug-search-btn').addEventListener('click', searchDrugs);
 byId('rx-drug-search').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); searchDrugs(); }
 });
-byId('rx-cat1').addEventListener('change', searchDrugs);
+byId('rx-cat1').addEventListener('change', () => {
+    renderCat2Options();    // 분류를 바꾸면 세부 분류 선택지도 그 분류 것만
+    searchDrugs();
+});
 byId('rx-cat2').addEventListener('change', searchDrugs);
 
 byId('rx-cart').addEventListener('click', (e) => {
