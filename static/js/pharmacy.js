@@ -246,7 +246,7 @@ function batchOptionsHtml(i) {
         const short = b.remaining_qty < i.quantity;
         const expired = b.expiry_date < currentVisit.visit_date;
         const label = [
-            `유통기한 ${b.expiry_date}${expired ? ' (지남)' : ''}`,
+            `유통기한 ${expiryText(b.expiry_date)}${expired ? ' (지남)' : ''}`,
             b.source,
             `잔량 ${b.remaining_qty}${short ? ' - 부족' : ''}`,
         ].join(' · ');
@@ -276,9 +276,15 @@ function dispenseItemHtml(i) {
                 <span class="dispense-item-qty ticket-number">× ${i.quantity}</span>
                 <button type="button" class="qty-edit-btn" data-action="edit-qty">수량 수정</button>
             </div>
+            ${ingredientHtml(i)}
             ${dosage ? `<div class="dispense-item-dosage">${escapeHtml(dosage)}</div>` : ''}
             ${batchHtml}
         </div>`;
+}
+
+// 처방약 이름 아래 성분 한 줄 (없으면 빈 문자열) - 조제 패널·수령 완료 패널
+function ingredientHtml(i) {
+    return i.ingredient ? `<div class="dispense-item-ingredient">${escapeHtml(i.ingredient)}</div>` : '';
 }
 
 function prescriptionHtml(p) {
@@ -764,7 +770,7 @@ async function loadDone() {
 function doneDrugHtml(i) {
     const dosage = dosageText(i);
     const batch = i.dispensed_batch
-        ? `배치: 유통기한 ${i.dispensed_batch.expiry_date} · ${i.dispensed_batch.source}`
+        ? `배치: 유통기한 ${expiryText(i.dispensed_batch.expiry_date)} · ${i.dispensed_batch.source}`
         : '배치 기록 없음';
     return `
         <div class="dispense-item">
@@ -772,6 +778,7 @@ function doneDrugHtml(i) {
                 <span class="dispense-item-name">${escapeHtml(i.drug_name)}</span>
                 <span class="dispense-item-qty ticket-number">× ${i.quantity}</span>
             </div>
+            ${ingredientHtml(i)}
             ${dosage ? `<div class="dispense-item-dosage">${escapeHtml(dosage)}</div>` : ''}
             <div class="dispense-item-dosage">${escapeHtml(batch)}</div>
         </div>`;
@@ -905,7 +912,7 @@ function stockBatchHtml(s) {
     const expired = s.expiry_date < today ? ' (지남)' : '';
     return `
         <div class="stock-batch${state}">
-            <span class="stock-batch-info">유통기한 ${escapeHtml(s.expiry_date)}${expired} · ${escapeHtml(s.source)}</span>
+            <span class="stock-batch-info">유통기한 ${escapeHtml(expiryText(s.expiry_date))}${expired} · ${escapeHtml(s.source)}</span>
             ${tag}
             <span class="stock-batch-qty">${s.remaining_qty} <small>/ ${s.allocated_qty}</small></span>
         </div>`;

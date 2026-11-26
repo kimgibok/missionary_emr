@@ -90,6 +90,14 @@
     color: var(--color-text-muted);
 }
 
+/* 처방약 성분 - 약 이름 바로 아래, 복용법보다 작게 */
+.dispense-item-ingredient {
+    margin-top: -2px;
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--color-text-muted);
+}
+
 /* [수량 수정] - 글자는 작게, 터치 영역은 44px */
 .qty-edit-btn {
     min-height: 44px;

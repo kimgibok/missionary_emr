@@ -282,13 +282,14 @@ class MissionStockSerializer(serializers.ModelSerializer):
 class PharmacyDrugItemSerializer(serializers.ModelSerializer):
     """약국팀 처방약 한 줄 - 환자에게 복용법을 설명할 수 있게 복용스케줄·용법 포함"""
     drug_name = serializers.CharField(source='drug.name', read_only=True)
+    ingredient = serializers.CharField(source='drug.ingredient', read_only=True)   # 조제 패널에서 약 이름 아래에 보여준다
     usage = serializers.CharField(source='drug.usage', read_only=True)
     dispensed_batch = serializers.SerializerMethodField()
 
     class Meta:
         model = PrescriptionDrug
         fields = [
-            'id', 'drug', 'drug_name', 'usage',
+            'id', 'drug', 'drug_name', 'ingredient', 'usage',
             'dose_per_intake', 'frequency_per_day', 'duration_days', 'quantity',
             'dispensed_stock', 'dispensed_batch',
         ]
