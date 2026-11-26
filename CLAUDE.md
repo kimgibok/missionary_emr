@@ -59,7 +59,7 @@ missionary_emr/
 │   └─ partials/            nav.html, modal.html, patient_intake_modal.html
 ├─ static/
 │   ├─ css/                 base.css(토큰·공통 컴포넌트), login, nav, page, modal, info, reception, clinical, pharmacy(조제지 인쇄 포함), admin
-│   ├─ js/                  api.js(apiFetch·apiDownload), common.js(escapeHtml·showToast·patientMeta·doctorLabel·byId·todayStr·dateTimeLabel),
+│   ├─ js/                  api.js(apiFetch·apiDownload·clearAuth), common.js(escapeHtml·showToast·patientMeta·doctorLabel·byId·todayStr·dateTimeLabel·expiryText),
 │   │                       nav.js, modal.js, login.js, select_mission.js,
 │   │                       patient-intake.js, info.js, reception.js, clinical.js, pharmacy.js, admin.js
 │   └─ fonts/               Pretendard-{Regular,Medium,SemiBold,Bold}.woff2
@@ -189,7 +189,7 @@ POST처럼 대상 객체가 없는 요청은 뷰의 `perform_create`에서 `owns
   401이면 `goLoginExpired()`가 로그인 화면으로 보내고, 로그인 화면이 "로그인이 만료되었습니다"를 크게 보여준다(sessionStorage `auth_expired`).
 - 요약 숫자 칸(`.stats-summary` / `.stat-tile`)과 통계 표(`.stats-table`, 숫자 칸 `.stats-qty`, 열이 많으면 `.table-scroll`로 감싸 폰에서 가로 스크롤)는 `base.css` 공용이다.
 - 사람이 입력한 문자열을 `innerHTML`에 넣을 때는 `escapeHtml()`을 거친다.
-- 여러 페이지가 쓰는 화면 도우미(`escapeHtml`, `showToast`, `patientMeta`, `doctorLabel`, `byId`, `todayStr`, `dateTimeLabel`)는 `common.js`에만 둔다. 페이지 js에 다시 정의하지 않는다 — 일반 `<script>`끼리는 `const`·`let` 이름을 공유해서, `const byId`가 두 번 있으면 페이지 전체가 멈춘다.
+- 여러 페이지가 쓰는 화면 도우미(`escapeHtml`, `showToast`, `patientMeta`, `doctorLabel`, `byId`, `todayStr`, `dateTimeLabel`, `PLACEHOLDER_EXPIRY`·`expiryText` - 임시 유통기한 2099-12-31을 '미확인'으로)는 `common.js`에만 둔다. 페이지 js에 다시 정의하지 않는다 — 일반 `<script>`끼리는 `const`·`let` 이름을 공유해서, `const byId`가 두 번 있으면 페이지 전체가 멈춘다.
 - 탭(`.tab-bar` / `.tab-button` / `.active`, 애플 세그먼트 모양)은 `base.css` 공용이다(약국·관리자). 페이지 js에서 탭 버튼을 찾을 때는 `#main-tabs` 안에서만 찾는다(기간 선택처럼 같은 모양의 다른 버튼과 섞이지 않게).
 - 디자인 토큰(색·반경·그림자)은 `base.css`의 `:root` 변수만 쓴다. 공통 컴포넌트(`.card`, `.field-input`, `.btn-primary`, `.toggle`, `.queue-item` 등)는 `base.css` 또는 공용 css에서 재사용하고 페이지마다 복제하지 않는다.
 - 디자인 톤: **애플 스타일** — 여백 넉넉, 은은한 그림자, 둥근 모서리, 깔끔한 타이포. 등록번호만 점선 테두리 + `tabular-nums`로 "번호표" 느낌을 낸다. 못생기게 만들지 않는다.
@@ -234,38 +234,41 @@ POST처럼 대상 객체가 없는 요청은 뷰의 `perform_create`에서 `owns
 
 ## 10. 앞으로 할 일
 
+**다음 미션**: 2027년 2월 마다가스카르(시간대 `Indian/Antananarivo`). 준비는 1월부터 하므로 DB의 미션 기간은 1월로 잡아 두었다. 지금은 테스트 기간이다.
+
 **다음 작업**
-- 현장 투입 전 정리 (`fix/` 브랜치, 2026-11-24 전체 리뷰 결과)
-  - 완료: 로그아웃·만료 때 로그인 키만 지움(`clearAuth`), 만료되면 로그인 화면에 크게 알림, 자동 출력 PC는 만료 30분 전부터 상태줄에 경고(토큰 8시간은 그대로 - 결정: 다시 로그인)
-  - 완료: 하루 목록 `page_size` 200 → 500 (접수 대기·완료, 조제 대기, 수령 완료)
-  - 완료: 안내팀 정리 - `patient-intake.js`의 `alert()` → `showToast`, `piEscape` → `escapeHtml`, `info.html`에 `common.js`·`reception.css`·토스트, `info.js` escape·인라인 style 제거
-  - 완료: 엑셀 시트 이름의 `\ / ? * [ ] :`를 `·`로 바꿈
-  - 완료: 보정 이력이 있는 창고 배치·미션 재고는 삭제 불가(결정 (a) - 이력은 숫자가 안 맞는 이유의 유일한 기록)
-  - 남은 것: `fix/field-readiness` PR
+- 임시 유통기한(2099-12-31) 배치 실제 날짜로 채우기: 관리자 [창고 재고] → 잔량 필터 '유통기한 미확인만' → 유통기한 칸을 눌러 입력, Enter로 다음 줄. (`feature/batch-expiry-inline`)
+- **운영 시작 전 DB 새로 시작** (결정: 테스트가 다 끝나면 싹 새로): 테스트 환자·방문·처방·테스트 분류·테스트 배치를 지우고 시작한다.
+  방법(새 DB에 마스터·약품만 남기기 / 테스트 데이터만 지우기)은 그때 정한다. 지우기 전에 `db/emr.db`를 복사해 둔다.
+- 현장 배포 준비: `config/local_settings.py`(`DEBUG = False`, 새 `SECRET_KEY`, `ALLOWED_HOSTS`), 현장 도착 후 [설정] 탭에서 시간대 확인
 - 약국 통계 탭의 재고 소진 예상: 약을 정해진 만큼만 가져가 현지에서 더 구하기 어려워, 미션 중에는 쓸모가 적을 수 있다.
   현장 피드백을 받아 필요 없으면 뺀다(다음 미션 계획용 정보는 관리자 '다음 미션 준비표'로).
 - 조제지 실제 프린터 출력 확인: 아직 못 해 봤다(영수증 프린터 예정, 80mm·58mm·A4는 크롬 PDF로만 확인). 현장 프린터가 정해지면 `--kiosk-printing`과 드라이버 용지·자르기 설정을 같이 확인한다.
-- 관리자 프론트엔드 (`feature/frontend-admin`) — 1단계 백엔드 정리 완료(재고 규칙·보정 이력·통계·엑셀)
+- 관리자 프론트엔드 완료 (PR #22, #25) — 1단계 백엔드 정리 완료(재고 규칙·보정 이력·통계·엑셀)
   - 2단계 화면 골격 완료: 탭 [통계 | 미션 재고 | 창고 재고 | 약품 | 설정], 미션 칩(통계·미션 재고 탭에서만, 진행중 먼저, 고른 미션 기억)
   - 3단계 통계 탭 완료: 요약 4칸, 진료과 × 소아/성인 × 성별 표, 약 분류(분류/세부 분류)·진료과별(펼치면 약 목록) 사용량, 다음 미션 준비표, 엑셀 다운로드(`apiDownload`)
   - 4단계 약품 탭 완료: 약품 검색·분류 필터·추가·수정·삭제(모달), 분류·세부 분류 추가·수정·삭제(분류는 복용스케줄 입력 여부). 목록 한 줄은 `.admin-row`, 삭제 확인은 `confirmDelete()`
   - 5-1단계 창고 재고 탭 완료: 입고 추가·수정·삭제(약품 분류별 선택), 출처·잔량 필터, 잔량 보정(`openAdjustModal`)·보정 이력(`openHistoryModal`) - 두 모달은 미션 재고와 공용
   - 5-2단계 미션 재고 탭 완료: 배분 추가(창고에 남은·이 미션에 없는 배치), 배분량 수정, 현장 잔량 보정·이력, 정산(한 줄 / 한꺼번에 - 기부량만 입력, 진행 중 미션이면 경고), 정산·상태·분류 필터
   - 6단계 설정 탭 완료: 현장 시간대 선택(한국·캄보디아·마다가스카르·태국·몽골 + 기타 직접 입력), 서버 기준 오늘·지금 시각·UTC 차이, 이 기기 시계와 비교(2분 넘게 다르면 경고), 변경은 확인 모달(진행 중 미션이면 경고)
-  - 남은 것: 관리자 PR
   - 미션 생성과 계정 역할 배정(`MissionMembership`)은 Django admin에 둔다.
-  - 창고·미션 재고 탭은 분류 칩 + 표(`feature/admin-stock-table`): 칩(전체·분류별 개수, ' - ' 앞부분으로 묶음 - '약속처방 - OS' → 약속처방, 고른 칩 기억) → 세부 분류 머리줄로 나눈 표(`stockTableHtml`), 버튼은 줄 끝. 유통기한 2099-12-31은 '미확인' 표시(`expiryCellHtml`).
+  - 창고·미션 재고 탭은 분류 칩 + 표: 칩(전체·분류별 개수, ' - ' 앞부분으로 묶음 - '약속처방 - OS' → 약속처방, 고른 칩 기억) → 세부 분류 머리줄로 나눈 표(`stockTableHtml`), 버튼은 줄 끝. 유통기한 2099-12-31은 '미확인' 표시(`expiryCellHtml`, 약국 화면은 `expiryText`).
+    창고 재고 표의 유통기한 칸은 눌러서 바로 고친다(`openExpiryEditor` - Enter = 저장하고 다음 줄, 다른 곳 누르기 = 저장, Esc = 취소).
+    칩 줄 오른쪽 [성분 보기]를 켜면 약품명 아래에 성분이 보인다(두 탭 공용 설정, localStorage `admin_show_ingredient`).
   - 약 통계(미션 선택 가능, 엑셀 포함): 분류(cat1·cat2)별·진료과별 사용량, 그리고 다음 미션 준비표(약마다 챙겨 간 양·쓴 양·남은 양·하루 평균).
     약국 화면은 "오늘 일하는 화면", 관리자는 "돌아보고 다음 미션을 계획하는 화면"으로 나눈다. 약국팀장도 필요하면 같은 API를 약국 탭에 붙인다.
-- 약품 가져오기 `import_drugs` 완료(`feature/import-drugs`): `python manage.py import_drugs "db/약품_리스트_아가페_2026_약품분류용1.xlsx"`(미리보기) → `--commit`.
+- 약품 가져오기 `import_drugs` 완료(PR #24, 실제 DB에 넣음 - 약품 77종·배치 86개): `python manage.py import_drugs "db/약품_리스트_아가페_2026_약품분류용1.xlsx"`(미리보기) → `--commit`.
   시트 '2026-경구' → 분류 '경구', '분류' 열 → 세부 분류(띄어쓰기 무시하고 기존 이름 사용, '외용약'→'외용'), 한 줄 = 창고 배치. 같은 배치는 다시 넣지 않아 두 번 돌려도 안전하다.
   출처 기본 후원·입고일 기본 오늘(`--source`, `--received-date`). 약속처방 세트 = 약 하나('약속처방(OS)', 단위 포). 소아 시럽은 수량이 없어 1병씩.
   복용스케줄: 경구·비타민 켬, 소아(시럽, 병 단위)·외용·주사제·추가약 끔 - 커맨드가 기존 분류 값도 맞춘다.
-  - 할 일: 유통기한이 없는 경구·비타민·소아·약속처방은 **임시 2099-12-31**로 들어간다 → 관리자 [창고 재고]에서 실제 날짜로 고친다. 엑셀의 코푸정은 '근이완제'로 분류돼 있다(진해거담제로 보임).
+  - 유통기한이 없는 경구·비타민·소아·약속처방은 **임시 2099-12-31**로 들어간다 → 위 '다음 작업'대로 창고 재고 표에서 채운다. 엑셀의 코푸정은 '근이완제'로 잘못 분류돼 있어 DB에서 진해거담제로 고쳤다(엑셀로 다시 넣어도 이미 있는 약품이라 분류는 그대로 유지된다).
 - 진료 차트 양식(`고객등록카드(캄보디아) - 2025.hwp`)에 있는 치과 차트(Primary/Permanent teeth) 모델과 화면
 - 수술팀 워크플로우, 통계 문서 저장(PDF/엑셀) 같은 부가 기능
 - 환자용 그림 복용지도(아침/점심/저녁, 식전/식후 그림). 지금 처방에는 1회량·1일 횟수·일수와 약의 `usage` 글자뿐이라, 복용 시점을 처방 입력에 먼저 추가해야 한다.
 - 약국 조제 화면의 [의사에게 돌려보내기] 버튼(재고가 없어 처방을 바꿔야 할 때). 지금은 약국팀이 의사에게 말로 전하고 의사가 [완료 취소]한다.
+- (아이디어, 아직 안 함) 품절 대체약 안내: 조제할 약이 이번 미션 재고에 없거나 모자라면 **같은 성분·같은 세부 분류**의 다른 약을 "이런 약이 남아 있어요"로 보여준다(자동으로 바꾸지 않음 - 약국은 약을 못 바꾸므로 의사에게 전하는 참고 정보, [의사에게 돌려보내기]와 같이 하면 좋다).
+  문제: 성분 글자가 제각각이다(`Eperisone` / `Eperisone Hydrochloride 50mg`, `AAP 650mg` / `Acetaminophen 325mg`, 함량 차이).
+  결정: **(c) 둘 다** - 글자 비교로 자동 후보를 띄우고, 관리자가 확인해 '대체 가능' 묶음으로 확정한다. 함량이 달라도 후보로 볼지 등 기준은 의사·약사에게 먼저 묻는다.
 
 **보류 중인 개선**
 - 한 사람이 동시에 두 미션에 배정된 경우, 선택한 미션을 서버에 반영하는 로직이 없다(현재는 항상 첫 번째 미션 사용). 화면(`/select-mission/`)만 있다.

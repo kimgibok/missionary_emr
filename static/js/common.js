@@ -57,6 +57,14 @@ function todayStr() {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+// 유통기한을 모르는 약에 import_drugs가 넣는 임시 날짜 - 화면에는 날짜 대신 '미확인'으로 보인다
+const PLACEHOLDER_EXPIRY = '2099-12-31';
+
+// 유통기한 글자 "2028-10-29" / 임시 날짜면 "미확인" (escape 전 문자열)
+function expiryText(date) {
+    return date === PLACEHOLDER_EXPIRY ? '미확인' : date;
+}
+
 // 서버 시각(ISO) → "2026-10-15 14:35" (이 기기 시간대)
 function dateTimeLabel(iso) {
     const d = new Date(iso);

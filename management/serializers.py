@@ -77,6 +77,7 @@ class DrugBatchSerializer(serializers.ModelSerializer):
     입고량을 고치면 잔량도 같은 만큼 같이 바뀐다.
     """
     drug_name = serializers.CharField(source='drug.name', read_only=True)
+    ingredient = serializers.CharField(source='drug.ingredient', read_only=True)   # 화면의 '성분 보기'용
     cat1_name = serializers.CharField(source='drug.cat1.name', read_only=True)     # 화면의 분류 칩·묶음용
     cat2_name = serializers.CharField(source='drug.cat2.name', read_only=True)
     source_display = serializers.CharField(source='get_source_display', read_only=True)
@@ -84,7 +85,7 @@ class DrugBatchSerializer(serializers.ModelSerializer):
     class Meta:
         model = DrugBatch
         fields = [
-            'id', 'drug', 'drug_name', 'cat1_name', 'cat2_name', 'source', 'source_display', 'source_detail', 'received_date', 'expiry_date',
+            'id', 'drug', 'drug_name', 'ingredient', 'cat1_name', 'cat2_name', 'source', 'source_display', 'source_detail', 'received_date', 'expiry_date',
             'unit_qty', 'unit_label', 'total_qty', 'remaining_qty',
         ]
         read_only_fields = ['remaining_qty']

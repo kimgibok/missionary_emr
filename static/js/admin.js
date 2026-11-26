@@ -658,9 +658,9 @@ async function openHistoryModal(name, query) {
 // 공용 - 재고 표 (창고 재고·미션 재고): 위에 분류 칩, 아래에 세부 분류로 나눈 표
 // =====================================================
 
-const PLACEHOLDER_EXPIRY = '2099-12-31';    // import_drugs가 유통기한 없는 약에 넣는 임시 날짜
 const BATCH_CAT_KEY = 'admin_batch_cat';    // 창고 재고에서 고른 분류 칩 (localStorage)
 const MS_CAT_KEY = 'admin_ms_cat';          // 미션 재고에서 고른 분류 칩 (localStorage)
+const SHOW_INGREDIENT_KEY = 'admin_show_ingredient';   // [성분 보기] 켰는지 - 창고·미션 재고 공용 (localStorage)
 
 function loadSaved(key) {
     return localStorage.getItem(key) || '';
@@ -692,6 +692,27 @@ function catChipsHtml(rows, selected) {
     return chip('', '전체', rows.length)
         + [...counts].sort((a, b) => compareKo(a[0], b[0])).map(([group, count]) => chip(group, group, count)).join('');
 }
+
+// [성분 보기] - 켜면 약품명 아래에 성분을 작게 보여준다. 두 탭의 스위치가 같은 값을 쓴다
+let showIngredient = loadSaved(SHOW_INGREDIENT_KEY) === '1';
+
+function stockNameCellHtml(name, ingredient) {
+    const detail = showIngredient && ingredient
+        ? `<span class="stock-ingredient">${escapeHtml(ingredient)}</span>`
+        : '';
+    return `<td class="stock-name"><span class="stock-name-main">${escapeHtml(name)}</span>${detail}</td>`;
+}
+
+document.querySelectorAll('.show-ingredient').forEach((box) => {
+    box.checked = showIngredient;
+    box.addEventListener('change', () => {
+        showIngredient = box.checked;
+        localStorage.setItem(SHOW_INGREDIENT_KEY, showIngredient ? '1' : '');
+        document.querySelectorAll('.show-ingredient').forEach((other) => { other.checked = showIngredient; });
+        renderBatches();
+        renderMissionStocks();
+    });
+});
 
 // 유통기한 칸 - 임시 날짜는 '미확인', 지났으면 '지남' 표시 (기기 날짜 기준)
 function expiryCellHtml(date) {
@@ -753,8 +774,12 @@ function batchRowHtml(b) {
     const source = b.source_detail ? `${b.source_display} (${b.source_detail})` : b.source_display;
     return `
         <tr data-id="${b.id}"${b.remaining_qty === 0 ? ' class="is-empty"' : ''}>
-            <td class="stock-name">${escapeHtml(b.drug_name)}</td>
-            <td>${expiryCellHtml(b.expiry_date)}</td>
+            ${stockNameCellHtml(b.drug_name, b.ingredient)}
+            <td class="expiry-cell">
+                <button type="button" class="expiry-edit" data-action="expiry" title="눌러서 유통기한 고치기">
+                    ${expiryCellHtml(b.expiry_date)}
+                </button>
+            </td>
             <td>${escapeHtml(source)}</td>
             <td class="stock-muted">${b.unit_qty}${escapeHtml(b.unit_label)}</td>
             <td class="stats-qty stock-qty">${b.remaining_qty} <small>/ ${b.total_qty}</small></td>
@@ -772,7 +797,8 @@ function renderBatches() {
     const stock = byId('batch-filter-stock').value;
     const filtered = batchList.filter((b) => (!source || b.source === source)
         && (stock !== 'left' || b.remaining_qty > 0)
-        && (stock !== 'empty' || b.remaining_qty === 0));
+        && (stock !== 'empty' || b.remaining_qty === 0)
+        && (stock !== 'unknown' || b.expiry_date === PLACEHOLDER_EXPIRY));
     const rows = filtered.filter((b) => !batchCat || catGroup(b.cat1_name) === batchCat);
 
     byId('batch-cats').innerHTML = catChipsHtml(filtered, batchCat);
@@ -929,11 +955,13 @@ byId('batch-cats').addEventListener('click', (e) => {
 
 byId('batch-list').addEventListener('click', (e) => {
     const row = e.target.closest('tr[data-id]');
-    const action = e.target.dataset.action;
+    // 버튼 안의 글자(예: '미확인' 태그)를 눌러도 버튼으로 본다
+    const action = e.target.closest('[data-action]')?.dataset.action;
     if (!row || !action) return;
     const b = batchList.find((x) => x.id === Number(row.dataset.id));
     if (!b) return;
     const name = `${b.drug_name} · 유통기한 ${b.expiry_date} · ${b.source_display}`;
+    if (action === 'expiry') openExpiryEditor(row, b);
     if (action === 'edit') openBatchModal(b);
     if (action === 'adjust') {
         openAdjustModal({
@@ -946,6 +974,72 @@ byId('batch-list').addEventListener('click', (e) => {
         confirmDelete({ title: '입고 배치 삭제', name, path: `/manage/drug-batches/${b.id}/`, onDone: loadBatches });
     }
 });
+
+// ----- 유통기한 표에서 바로 고치기 -----
+// 칸을 누르면 날짜 입력칸. Enter = 저장하고 다음 줄로, 다른 곳 누르기 = 저장, Esc = 취소.
+// '유통기한 미확인만'을 켜고 Enter로 이어 가면 임시 날짜(import_drugs)를 차례로 채울 수 있다.
+
+function openExpiryEditor(row, b) {
+    const cell = row.querySelector('.expiry-cell');
+    cell.innerHTML = `<input type="date" class="field-input expiry-input" aria-label="${escapeHtml(b.drug_name)} 유통기한"
+                             value="${b.expiry_date === PLACEHOLDER_EXPIRY ? '' : escapeHtml(b.expiry_date)}">`;
+    const input = cell.querySelector('input');
+    let finished = false;   // Enter 뒤에 blur가 또 오므로 한 번만 처리
+
+    const finish = (save, moveNext) => {
+        if (finished) return;
+        finished = true;
+        if (save && input.value && input.value !== b.expiry_date) {
+            saveExpiry(b, input.value, moveNext);
+        } else {
+            renderBatches();
+            if (moveNext) openNextExpiry(b.id);
+        }
+    };
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); finish(true, true); }
+        if (e.key === 'Escape') { e.preventDefault(); finish(false, false); }
+    });
+    input.addEventListener('blur', () => finish(true, false));
+    input.focus();
+}
+
+// 지금 보이는 표에서 id 다음 줄의 유통기한을 연다 (저장한 줄이 필터로 빠졌으면 그 자리의 다음 줄)
+function openNextExpiry(afterId, orderBefore = null) {
+    const order = orderBefore || [...byId('batch-list').querySelectorAll('tr[data-id]')].map((tr) => Number(tr.dataset.id));
+    const index = order.indexOf(afterId);
+    const visible = new Set([...byId('batch-list').querySelectorAll('tr[data-id]')].map((tr) => Number(tr.dataset.id)));
+    const nextId = order.slice(index + 1).find((id) => visible.has(id));
+    if (nextId === undefined) return;
+    const row = byId('batch-list').querySelector(`tr[data-id="${nextId}"]`);
+    const b = batchList.find((x) => x.id === nextId);
+    if (row && b) openExpiryEditor(row, b);
+}
+
+async function saveExpiry(b, date, moveNext) {
+    if (isBusy) {
+        showToast('앞의 저장이 끝나지 않았습니다. 잠시 후 다시 입력해주세요.', true);
+        renderBatches();
+        return;
+    }
+    // 저장하면 표를 다시 그리므로, 다음 줄을 찾으려고 지금 순서를 먼저 기억한다
+    const orderBefore = [...byId('batch-list').querySelectorAll('tr[data-id]')].map((tr) => Number(tr.dataset.id));
+    isBusy = true;
+    let updated;
+    try {
+        updated = await apiFetch(`/manage/drug-batches/${b.id}/`, { method: 'PATCH', body: JSON.stringify({ expiry_date: date }) });
+    } catch (err) {
+        showToast(err.message, true);
+        renderBatches();
+        return;
+    } finally {
+        isBusy = false;
+    }
+    batchList = batchList.map((x) => (x.id === b.id ? { ...x, ...updated } : x));
+    renderBatches();
+    showToast(`${b.drug_name} 유통기한 ${date}`);
+    if (moveNext) openNextExpiry(b.id, orderBefore);
+}
 
 byId('batch-add-btn').addEventListener('click', () => openBatchModal());
 byId('batch-search').addEventListener('input', () => {
@@ -997,7 +1091,7 @@ function msRowHtml(s) {
     const state = s.is_settled ? ' class="is-settled"' : (s.remaining_qty === 0 ? ' class="is-empty"' : '');
     return `
         <tr data-id="${s.id}"${state}>
-            <td class="stock-name">${escapeHtml(s.drug_name)}</td>
+            ${stockNameCellHtml(s.drug_name, s.ingredient)}
             <td>${expiryCellHtml(s.expiry_date)}</td>
             <td>${escapeHtml(s.source_display)}</td>
             <td class="stats-qty stock-muted">${s.used_qty} <small>(${Math.round(s.consumption_rate * 100)}%)</small></td>

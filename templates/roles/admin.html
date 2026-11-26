@@ -98,7 +98,12 @@
                         <option value="settled">정산 완료</option>
                     </select>
                 </div>
-                <div class="cat-chips" id="ms-cats" role="group" aria-label="분류로 거르기"></div>
+                <div class="stock-toolbar">
+                    <div class="cat-chips" id="ms-cats" role="group" aria-label="분류로 거르기"></div>
+                    <label class="toggle stock-ingredient-toggle">
+                        <input type="checkbox" class="show-ingredient"><span>성분 보기</span>
+                    </label>
+                </div>
                 <div id="ms-list"></div>
             </section>
         </div>
@@ -125,13 +130,19 @@
                         <option value="local_purchase">현지구매</option>
                         <option value="etc">기타</option>
                     </select>
-                    <select class="field-input" id="batch-filter-stock" aria-label="잔량으로 거르기">
+                    <select class="field-input" id="batch-filter-stock" aria-label="잔량·유통기한으로 거르기">
                         <option value="">잔량 전체</option>
                         <option value="left">창고에 남은 것만</option>
                         <option value="empty">창고 잔량 0</option>
+                        <option value="unknown">유통기한 미확인만</option>
                     </select>
                 </div>
-                <div class="cat-chips" id="batch-cats" role="group" aria-label="분류로 거르기"></div>
+                <div class="stock-toolbar">
+                    <div class="cat-chips" id="batch-cats" role="group" aria-label="분류로 거르기"></div>
+                    <label class="toggle stock-ingredient-toggle">
+                        <input type="checkbox" class="show-ingredient"><span>성분 보기</span>
+                    </label>
+                </div>
                 <div id="batch-list"></div>
             </section>
         </div>
