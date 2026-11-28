@@ -155,6 +155,11 @@ REST_FRAMEWORK = {
 }
 
 
+# 식약처 의약품 제품 허가정보 API(공공데이터포털 data.go.kr) 인증키 - 관리자 [약품] 모달의 [약 정보 찾기]용.
+# 준비할 때(인터넷 되는 곳)만 쓰는 기능이라 비어 있으면 그 버튼만 꺼진다. 키는 local_settings.py에만 넣는다(git 제외).
+MFDS_API_KEY = ''
+
+
 # 현장별 설정 덮어쓰기 (config/local_settings.py, git 제외)
 # 견본: config/local_settings.example.py
 try:

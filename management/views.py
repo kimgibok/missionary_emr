@@ -24,6 +24,7 @@ from clinic.models import (
     Prescription, PrescriptionDrug, SiteConfig, StockAdjustment, Visit,
 )
 
+from . import mfds
 from .permissions import IsSuperUser
 from .serializers import (
     DrugCategory1Serializer, DrugCategory2Serializer, DrugSerializer, DrugBatchSerializer,
@@ -372,6 +373,43 @@ class StockAdjustmentListView(generics.ListAPIView):
         if params.get('mission_stock'):
             return qs.filter(mission_stock_id=params['mission_stock'])
         raise ValidationError({'detail': 'drugbatch 또는 mission_stock 쿼리 파라미터가 필요합니다.'})
+
+
+# =====================================================
+# 약 정보 찾기 - 식약처 의약품 제품 허가정보 API (준비할 때만 쓰는 인터넷 기능, management/mfds.py)
+# =====================================================
+
+class DrugInfoStatusView(APIView):
+    """[약 정보 찾기]를 쓸 수 있는지 - 인증키가 설정됐는지만 본다(인터넷 연결은 찾을 때 확인)"""
+    permission_classes = [IsSuperUser]
+
+    def get(self, request):
+        return Response({'enabled': mfds.is_enabled()})
+
+
+class DrugInfoSearchView(APIView):
+    """품목명으로 식약처 허가 품목 찾기 (?q=) → 최대 20개. 인터넷이 없으면 503 + 안내 문구"""
+    permission_classes = [IsSuperUser]
+
+    def get(self, request):
+        query = request.query_params.get('q', '').strip()
+        if len(query) < 2:
+            raise ValidationError({'detail': '약 이름을 두 글자 이상 입력해 주세요.'})
+        try:
+            return Response({'results': mfds.search(query)})
+        except mfds.MfdsError as err:
+            return Response({'detail': str(err)}, status=err.status)
+
+
+class DrugInfoDetailView(APIView):
+    """식약처 품목 하나의 상세 → 성분·용법·주성분 코드 등 약품 칸에 넣을 값 + 참고 정보"""
+    permission_classes = [IsSuperUser]
+
+    def get(self, request, item_seq):
+        try:
+            return Response(mfds.detail(item_seq))
+        except mfds.MfdsError as err:
+            return Response({'detail': str(err)}, status=err.status)
 
 
 # =====================================================

@@ -794,3 +794,131 @@
 .import-lines.is-error {
     color: var(--color-danger);
 }
+
+
+/* ---------- 약품 모달 - 약 정보 찾기 (식약처) ---------- */
+.lookup-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: -6px 0 12px;
+}
+
+.lookup-status {
+    font-size: 12px;
+    color: var(--color-text-muted);
+}
+
+.lookup-panel {
+    margin-bottom: 14px;
+    padding: 12px;
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+}
+
+.lookup-search {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.lookup-search .field-input {
+    margin: 0;
+}
+
+.lookup-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.lookup-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-height: 44px;
+    padding: 10px 12px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    text-align: left;
+    transition: border-color 0.15s ease;
+}
+
+.lookup-item:hover,
+.lookup-item:focus-visible {
+    border-color: var(--color-accent);
+}
+
+.lookup-item-name {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.lookup-item-meta {
+    font-size: 12px;
+    color: var(--color-text-muted);
+}
+
+.lookup-picked {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-bottom: 10px;
+    font-size: 14px;
+}
+
+/* 넣을 값 한 줄: 이름 | 값 | [넣기] */
+.lookup-field {
+    display: grid;
+    grid-template-columns: 72px 1fr auto;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--color-border);
+    font-size: 13px;
+}
+
+.lookup-field-label {
+    color: var(--color-text-muted);
+}
+
+.lookup-field-value {
+    word-break: break-word;
+}
+
+.lookup-empty {
+    color: var(--color-text-muted);
+}
+
+.lookup-note {
+    display: block;
+    margin-top: 2px;
+    font-size: 12px;
+    color: var(--color-danger);
+}
+
+.lookup-actions {
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 12px 0 4px;
+}
+
+.lookup-ref-label {
+    margin: 10px 0 2px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-text-muted);
+}
+
+.lookup-ref-text {
+    font-size: 12px;
+    line-height: 1.6;
+    white-space: pre-line;
+}

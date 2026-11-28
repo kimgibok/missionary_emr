@@ -64,7 +64,10 @@ class DrugSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Drug
-        fields = ['id', 'cat1', 'cat1_name', 'cat2', 'cat2_name', 'name', 'ingredient', 'usage']
+        fields = [
+            'id', 'cat1', 'cat1_name', 'cat2', 'cat2_name', 'name', 'ingredient', 'usage',
+            'mfds_item_seq', 'ingredient_codes',    # [약 정보 찾기]로 식약처 품목에 연결했을 때
+        ]
 
 
 # =====================================================
