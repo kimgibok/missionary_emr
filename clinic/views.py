@@ -339,6 +339,17 @@ class DrugCategoryTreeView(APIView):
 # 진료팀 - 처방 작성·조회·수정
 # =====================================================
 
+def check_drug_prescribable(drug, prescription):
+    """
+    처방할 수 있는 약인지 - 그 방문의 미션에서 정산 전이고 잔량이 남은 배치가 있어야 한다(prescribable_drugs).
+    화면의 약 검색도 같은 조건으로 거르지만, 담아 둔 사이에 정산·소진될 수 있어 저장할 때 서버가 한 번 더 확인한다.
+    미션은 요청자가 아니라 처방이 달린 방문 기준 (superuser는 미션 멤버가 아닐 수 있다)
+    """
+    mission = prescription.visit_department.visit.mission
+    if not prescribable_drugs(mission).filter(pk=drug.pk).exists():
+        raise ValidationError({'detail': f'{drug.name}: 이번 미션 재고에 없거나 다 떨어진 약입니다. 약 검색에서 다시 골라주세요.'})
+
+
 def check_prescription_editable(prescription):
     """진료 완료된 배정의 처방이나 약국에서 이미 수령 처리된 처방은 진료팀이 고칠 수 없다"""
     if prescription.visit_department.is_done:
@@ -413,6 +424,7 @@ class PrescriptionDrugCreateView(generics.CreateAPIView):
         if not owns_visit_department(self.request.user, prescription.visit_department):
             raise PermissionDenied('본인이 작성한 처방에만 약을 추가할 수 있습니다.')
         check_prescription_editable(prescription)
+        check_drug_prescribable(serializer.validated_data['drug'], prescription)
         serializer.save()
 
 
@@ -423,7 +435,12 @@ class PrescriptionDrugClinicalUpdateView(generics.UpdateAPIView, generics.Destro
     permission_classes = [IsClinicalTeam, IsPrescriptionOwner]
 
     def perform_update(self, serializer):
-        check_prescription_editable(serializer.instance.prescription)
+        prescription = serializer.instance.prescription
+        check_prescription_editable(prescription)
+        # 약을 바꿀 때만 확인 - 이미 담긴 약의 수량·복용법만 고치는 건 재고와 상관없이 허용
+        new_drug = serializer.validated_data.get('drug')
+        if new_drug is not None and new_drug.pk != serializer.instance.drug_id:
+            check_drug_prescribable(new_drug, prescription)
         serializer.save()
 
     def perform_destroy(self, instance):
