@@ -1132,6 +1132,15 @@ function renderCart() {
     byId('rx-cart').innerHTML = rxCart.map(cartItemHtml).join('');
 }
 
+// 저장 직전에 장바구니 약이 아직 처방할 수 있는지(그 사이 정산·소진되지 않았는지) 확인한다.
+// 처방을 먼저 만들고 약을 붙이는 순서라, 여기서 미리 걸러야 약이 빠진 처방이 남지 않는다 (서버도 약마다 다시 확인)
+async function findUnavailableCartDrugs(cart) {
+    if (cart.length === 0) return [];
+    const data = await apiFetch('/drugs/?page_size=500');
+    const available = new Set(data.results.map((d) => d.drug_id));
+    return cart.filter((item) => !available.has(item.drug_id));
+}
+
 async function saveNewPrescription() {
     if (!currentAssignment || isBusy) return;
 
@@ -1156,6 +1165,13 @@ async function saveNewPrescription() {
     saveBtn.textContent = '저장 중…';
 
     try {
+        const gone = await findUnavailableCartDrugs(rxCart);
+        if (gone.length > 0) {
+            errorEl.textContent = `그 사이 재고가 없어진 약이 있습니다: ${gone.map((i) => i.drug_name).join(', ')}. `
+                + '장바구니에서 빼고 다시 저장해주세요.';
+            return;
+        }
+
         const prescription = await apiFetch('/prescriptions/', {
             method: 'POST',
             body: JSON.stringify({
@@ -1173,18 +1189,19 @@ async function saveNewPrescription() {
                     body: JSON.stringify({ prescription: prescription.id, ...buildPrescriptionDrugPayload(item) }),
                 });
             } catch (err) {
-                failedDrugs.push(item.drug_name);
+                failedDrugs.push(`${item.drug_name}(${err.message})`);
             }
         }
 
+        // resetRxForm()이 오류 칸을 비우므로 안내는 그 다음에 쓴다
+        resetRxForm();
         if (failedDrugs.length > 0) {
-            errorEl.textContent = `처방은 저장됐지만 다음 약 추가에 실패했습니다: ${failedDrugs.join(', ')}`;
+            errorEl.textContent = `처방은 저장됐지만 다음 약은 빠졌습니다: ${failedDrugs.join(', ')}. `
+                + '아래 처방 카드를 확인하고 필요하면 새 처방으로 다시 담아주세요.';
         } else {
             isDirty = false;
             showToast('처방을 저장했습니다.');
         }
-
-        resetRxForm();
         await loadPrescriptions(currentAssignment.id);
     } catch (err) {
         errorEl.textContent = err.message;
