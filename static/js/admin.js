@@ -138,14 +138,15 @@ function renderStatsSummary(visit) {
     ].join('');
 }
 
-// 진료과 × (소아/성인 × 성별) 표 + 맨 아래 전체(방문 기준)
+// 진료과 × (소아/성인 × 성별) 표 + 맨 아래 전체(방문 기준) - 환자 통계와 날짜별(하루치)이 같이 쓴다
 function renderVisitStatsTable(visit) {
-    if (visit.rows.length === 0) {
-        byId('visit-stats-table').innerHTML = emptyRowHtml('아직 진료 완료된 환자가 없습니다.');
-        return;
-    }
+    byId('visit-stats-table').innerHTML = deptAgeSexTableHtml(visit.rows, visit.by_age_sex);
+}
+
+function deptAgeSexTableHtml(rows, byAgeSex) {
+    if (rows.length === 0) return emptyRowHtml('진료 완료된 환자가 없습니다.');
     const table = new Map();   // 진료과 → { '소아M': 3, ... }
-    visit.rows.forEach((r) => {
+    rows.forEach((r) => {
         if (!table.has(r.department)) table.set(r.department, {});
         table.get(r.department)[r.age_group + r.sex] = r.count;
     });
@@ -155,9 +156,9 @@ function renderVisitStatsTable(visit) {
         return values.map((n) => `<td class="stats-qty">${n}</td>`).join('') + `<td class="stats-qty">${total}</td>`;
     };
     const totals = {};
-    visit.by_age_sex.forEach((x) => { totals[x.age_group + x.sex] = x.count; });
+    byAgeSex.forEach((x) => { totals[x.age_group + x.sex] = x.count; });
 
-    byId('visit-stats-table').innerHTML = `
+    return `
         <table class="stats-table">
             <thead><tr>
                 <th>진료과</th>
@@ -251,16 +252,165 @@ async function loadStats(mission) {
         renderCategoryStats();
         renderDepartmentStats(drug);
         renderPrepTable(drug);
+        renderDailyStats(visit.daily);
+        renderDoctorStats(visit.doctors, visit.doctors_others);
     } catch (err) {
         if (seq !== statsRequestSeq) return;
         statsData = null;
         byId('admin-stats-summary').innerHTML = '';
         byId('visit-stats-table').innerHTML = `<p class="empty-text is-error">${escapeHtml(err.message)}</p>`;
-        ['category-stats-table', 'department-stats', 'prep-table'].forEach((id) => { byId(id).innerHTML = ''; });
+        ['category-stats-table', 'department-stats', 'prep-table', 'daily-stats-table', 'daily-print-all', 'doctor-stats']
+            .forEach((id) => { byId(id).innerHTML = ''; });
+        byId('daily-day-summary').hidden = true;
     }
 }
 
 TAB_LOADERS.stats = loadStats;
+
+// ----- 날짜별 환자 수 -----
+
+const DAILY_COLUMNS = [
+    ['registered', '등록'], ['done', '진료 완료'], ['dispensed', '약 수령'],
+    ['child', '소아'], ['adult', '성인'], ['male', '남'], ['female', '여'],
+];
+
+let dailyData = null;    // { rows: [{date, registered, ..., by_department, by_age_sex}], total } - 서버 응답 그대로
+
+// 전체 날짜 요약표 - 날짜마다 등록·진료 완료·약 수령·소아·성인·남·여, 맨 아래 합계
+function dailyOverviewHtml(daily) {
+    const cells = (row) => DAILY_COLUMNS.map(([key]) => `<td class="stats-qty">${row[key]}</td>`).join('');
+    return `
+        <table class="stats-table">
+            <thead><tr>
+                <th>날짜</th>${DAILY_COLUMNS.map(([, label]) => `<th class="stats-qty">${label}</th>`).join('')}
+            </tr></thead>
+            <tbody>
+                ${daily.rows.map((r) => `<tr><td class="nowrap">${escapeHtml(r.date)}</td>${cells(r)}</tr>`).join('')}
+                <tr class="is-total"><td>합계 (${daily.rows.length}일)</td>${cells(daily.total)}</tr>
+            </tbody>
+        </table>`;
+}
+
+const DAILY_ALL = 'all';    // 날짜 드롭다운의 '전체 기간'
+
+function renderDailyStats(daily) {
+    dailyData = daily;
+    const select = byId('daily-date');
+    // 고르던 날짜가 이 미션에도 있으면 그대로, 아니면 가장 최근 진료 날짜(진료가 없으면 가장 최근 날짜)
+    const latestDone = [...daily.rows].reverse().find((r) => r.done > 0) || daily.rows[daily.rows.length - 1];
+    const keep = select.value === DAILY_ALL || daily.rows.some((r) => r.date === select.value)
+        ? select.value
+        : (latestDone ? latestDone.date : DAILY_ALL);
+    select.innerHTML = [...daily.rows].reverse().map((r) =>
+        `<option value="${escapeHtml(r.date)}"${r.date === keep ? ' selected' : ''}>${escapeHtml(r.date)} · 진료 ${r.done}명</option>`,
+    ).join('') + `<option value="${DAILY_ALL}"${keep === DAILY_ALL ? ' selected' : ''}>전체 기간</option>`;
+
+    // 인쇄용: 전체 요약 + 진료가 있던 날마다 진료과 표
+    byId('daily-print-all').innerHTML = daily.rows.length === 0 ? '' : dailyOverviewHtml(daily) + daily.rows
+        .filter((r) => r.done > 0)
+        .map((r) => `<h3 class="daily-print-date">${escapeHtml(r.date)} · 진료 ${r.done}명</h3>
+                     ${deptAgeSexTableHtml(r.by_department, r.by_age_sex)}`)
+        .join('');
+    renderDailyView();
+}
+
+// 드롭다운에서 고른 날짜 - 그날 숫자 4칸 + 진료과 × 소아/성인 × 성별 표.
+// '전체 기간'이면 전체 숫자 + 전체 진료과 표(환자 통계와 같음) + 날짜마다 등록·진료 완료·약 수령 요약표
+function renderDailyView() {
+    const summary = byId('daily-day-summary');
+    if (!dailyData || dailyData.rows.length === 0) {
+        summary.hidden = true;
+        byId('daily-stats-table').innerHTML = emptyRowHtml('아직 등록된 환자가 없습니다.');
+        return;
+    }
+    const isAll = byId('daily-date').value === DAILY_ALL;
+    const day = isAll ? dailyData.total : dailyData.rows.find((r) => r.date === byId('daily-date').value);
+    if (!day) return;
+    summary.hidden = false;
+    summary.innerHTML = [
+        statTileHtml('등록', day.registered, '명'),
+        statTileHtml('진료 완료', day.done, '명'),
+        statTileHtml('약 수령', day.dispensed, '명'),
+        statTileHtml('소아 / 성인', `${day.child} / ${day.adult}`, '명'),
+    ].join('');
+    byId('daily-stats-table').innerHTML = isAll
+        ? deptAgeSexTableHtml(statsData.visit.rows, statsData.visit.by_age_sex)
+          + `<h3 class="daily-sub-title">날짜마다 한눈에</h3>${dailyOverviewHtml(dailyData)}`
+        : deptAgeSexTableHtml(day.by_department, day.by_age_sex);
+}
+
+byId('daily-date').addEventListener('change', renderDailyView);
+
+// ----- 의사별 진료 수 (펼치면 진료과별) -----
+
+// others: 진료팀이 아닌 계정(관리자 테스트 등)이 쓴 처방 - 의사별에서 빼고 건수만 알려준다
+function renderDoctorStats(doctors, others) {
+    const note = others && others.prescriptions > 0
+        ? `<p class="modal-note doctor-others-note">진료팀이 아닌 계정(${escapeHtml(others.names.join(', '))})이 쓴 처방
+               ${others.prescriptions}건(환자 ${others.patients}명)은 의사별에 넣지 않았습니다. 환자 통계에는 들어갑니다.</p>`
+        : '';
+    if (doctors.length === 0) {
+        byId('doctor-stats').innerHTML = emptyRowHtml('이 미션에 진료팀 의사가 없습니다.') + note;
+        return;
+    }
+    byId('doctor-stats').innerHTML = note + doctors.map((d) => `
+        <details class="dept-row">
+            <summary>
+                <span class="dept-name">${doctorLabel(d.name, d.department_code)}</span>
+                <span class="dept-numbers">환자 <strong>${d.patients}</strong>명 · 처방 ${d.prescriptions}건 · 소아 ${d.child} · 성인 ${d.adult}</span>
+            </summary>
+            ${d.departments.length === 0
+                ? emptyRowHtml('진료 완료된 환자가 없습니다.')
+                : `<table class="stats-table"><tbody>${d.departments.map((x) => `
+                       <tr><td>${escapeHtml(x.name)}</td><td class="stats-qty">${x.count}명</td></tr>`).join('')}
+                   </tbody></table>`}
+        </details>`).join('');
+}
+
+// ----- 통계 종류 드롭다운 (마지막으로 본 것 기억) -----
+
+const STATS_TAB_KEY = 'admin_stats_tab';
+const STATS_TABS = ['patients', 'daily', 'doctors', 'drugs', 'prep'];
+
+function showStatsTab(tab) {
+    const active = STATS_TABS.includes(tab) ? tab : 'patients';
+    localStorage.setItem(STATS_TAB_KEY, active);
+    byId('stats-view').value = active;
+    document.querySelectorAll('[data-stats-panel]').forEach((panel) => {
+        panel.hidden = panel.dataset.statsPanel !== active;
+    });
+}
+
+byId('stats-view').addEventListener('change', () => showStatsTab(byId('stats-view').value));
+showStatsTab(loadSaved(STATS_TAB_KEY));
+
+// ----- PDF로 저장 (브라우저 인쇄 → 'PDF로 저장') -----
+// 인쇄할 때는 작은 탭과 상관없이 통계 전부를 찍는다(admin.css의 @media print). 펼치는 줄도 전부 펼친다.
+
+let printOpened = [];   // 인쇄하려고 펼친 <details> - 끝나면 다시 접는다
+
+byId('stats-print-btn').addEventListener('click', () => {
+    if (!currentMission || !statsData) {
+        showToast('통계를 불러온 뒤에 저장할 수 있습니다.', true);
+        return;
+    }
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    byId('stats-print-head').innerHTML = `
+        <h1>${escapeHtml(currentMission.country)} 미션 통계</h1>
+        <p>${missionPeriodLabel(currentMission)} · 출력 ${todayStr()} ${pad(now.getHours())}:${pad(now.getMinutes())}</p>`;
+    window.print();
+});
+
+window.addEventListener('beforeprint', () => {
+    printOpened = [...byId('tab-stats').querySelectorAll('details:not([open])')];
+    printOpened.forEach((d) => { d.open = true; });
+});
+
+window.addEventListener('afterprint', () => {
+    printOpened.forEach((d) => { d.open = false; });
+    printOpened = [];
+});
 
 byId('category-tabs').addEventListener('click', (e) => {
     const btn = e.target.closest('.tab-button');

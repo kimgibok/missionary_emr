@@ -19,8 +19,8 @@ from rest_framework.views import APIView
 
 from clinic.middleware import get_site_time_zone
 from clinic.models import (
-    Drug, DrugCategory1, DrugCategory2, DrugBatch, Mission, MissionStock,
-    Prescription, PrescriptionDrug, SiteConfig, StockAdjustment,
+    Drug, DrugCategory1, DrugCategory2, DrugBatch, Mission, MissionMembership, MissionStock,
+    Prescription, PrescriptionDrug, SiteConfig, StockAdjustment, Visit,
 )
 
 from .permissions import IsSuperUser
@@ -399,13 +399,17 @@ def age_group(visit_date, birth_year):
     return '소아' if visit_date.year - birth_year <= 19 else '성인'
 
 
-def compute_visit_stats(mission):
+def compute_visit_stats(mission, visit_date=None):
     """
     진료과별 환자 수 - 진료 완료된 배정의 처방 기준.
     같은 과 처방이 여러 건이어도 그 방문은 1명, 두 과를 본 방문은 각 과에 1명씩.
+    visit_date를 주면 그날 방문만 (날짜별 진료과 표)
     """
+    base = Prescription.objects.filter(visit_department__visit__mission=mission, visit_department__is_done=True)
+    if visit_date is not None:
+        base = base.filter(visit_department__visit__visit_date=visit_date)
     rows = (
-        Prescription.objects.filter(visit_department__visit__mission=mission, visit_department__is_done=True)
+        base
         .values(
             'department__name',
             visit_id=F('visit_department__visit_id'),
@@ -524,12 +528,130 @@ def compute_drug_stats(mission):
     }
 
 
+def compute_daily_stats(mission):
+    """
+    날짜별 환자 수 - registered: 안내팀 방문 등록 / done: 진료 완료(compute_visit_stats와 같은 기준 - 진료 완료된 배정의 처방이 있는 방문)
+    / dispensed: 약 수령 처리된 방문. 소아·성인·성별은 진료 완료 기준. 등록만 있고 진료가 없던 날도 나온다.
+    """
+    days = {}
+
+    def day(date):
+        return days.setdefault(date, {
+            'date': date, 'registered': 0, 'done': 0, 'dispensed': 0, 'child': 0, 'adult': 0, 'male': 0, 'female': 0,
+        })
+
+    for r in Visit.objects.filter(mission=mission).values('visit_date').annotate(c=Count('id')):
+        day(r['visit_date'])['registered'] = r['c']
+
+    done = (
+        Prescription.objects.filter(visit_department__visit__mission=mission, visit_department__is_done=True)
+        .values(
+            visit_id=F('visit_department__visit_id'),
+            visit_date=F('visit_department__visit__visit_date'),
+            sex=F('visit_department__visit__patient__sex'),
+            birth_year=F('visit_department__visit__patient__birth_year'),
+        )
+        .distinct()
+    )
+    for r in done:
+        row = day(r['visit_date'])
+        row['done'] += 1
+        row['child' if age_group(r['visit_date'], r['birth_year']) == '소아' else 'adult'] += 1
+        row['male' if r['sex'] == 'M' else 'female'] += 1
+
+    dispensed = (
+        Prescription.objects.filter(visit_department__visit__mission=mission, is_dispensed=True)
+        .values('visit_department__visit__visit_date')
+        .annotate(c=Count('visit_department__visit', distinct=True))
+    )
+    for r in dispensed:
+        day(r['visit_department__visit__visit_date'])['dispensed'] = r['c']
+
+    rows = [days[d] for d in sorted(days)]
+    # 날짜마다 진료과 × 소아/성인 × 성별 (진료 날짜가 많지 않아 한 번에 담는다 - 화면은 드롭다운으로 고르기만)
+    for r in rows:
+        day_stats = compute_visit_stats(mission, r['date'])
+        r['by_department'] = day_stats['rows']
+        r['by_age_sex'] = day_stats['by_age_sex']
+    keys = ('registered', 'done', 'dispensed', 'child', 'adult', 'male', 'female')
+    return {'rows': rows, 'total': {k: sum(r[k] for r in rows) for k in keys}}
+
+
+def compute_doctor_stats(mission):
+    """
+    의사별 진료 수 - 진료 완료된 배정의 처방 기준(환자 통계와 같은 기준).
+    patients: 진료한 환자(방문) 수, prescriptions: 처방 건수, departments: 그 의사가 처방한 진료과별 환자 수.
+    doctors = 이번 미션 진료팀 멤버만(0명 포함). 진료팀이 아닌 계정(관리자 테스트 등)이 쓴 처방은
+    others에 건수만 모은다 - 환자 통계에는 들어가므로, 숫자가 안 맞을 때 이유를 알 수 있게.
+    """
+    base = Prescription.objects.filter(visit_department__visit__mission=mission, visit_department__is_done=True)
+    doctors = {}
+    others = {'prescriptions': 0, 'visits': set(), 'names': set()}
+
+    def doctor(user):
+        return doctors.setdefault(user.id, {
+            'doctor_id': user.id,
+            'name': user.name or user.username,
+            'department_code': user.primary_department.name if user.primary_department else None,
+            'patients': 0, 'prescriptions': 0, 'child': 0, 'adult': 0, 'departments': {},
+        })
+
+    for m in MissionMembership.objects.filter(mission=mission, role__name='진료팀').select_related('user__primary_department'):
+        doctor(m.user)
+
+    seen_visits = set()
+    for p in base.select_related(
+        'department', 'visit_department__user__primary_department', 'visit_department__visit__patient',
+    ):
+        vd = p.visit_department
+        if vd.user_id not in doctors:   # 이번 미션 진료팀이 아님
+            others['prescriptions'] += 1
+            others['visits'].add(vd.visit_id)
+            others['names'].add(vd.user.name or vd.user.username)
+            continue
+        d = doctors[vd.user_id]
+        d['prescriptions'] += 1
+        visit = vd.visit
+        if (vd.user_id, visit.id) not in seen_visits:
+            seen_visits.add((vd.user_id, visit.id))
+            d['patients'] += 1
+            d['child' if age_group(visit.visit_date, visit.patient.birth_year) == '소아' else 'adult'] += 1
+        # 같은 의사·같은 방문·같은 과 처방이 여러 건이어도 그 과에 1명
+        d['departments'].setdefault(p.department.name, set()).add(visit.id)
+
+    result = []
+    for d in doctors.values():
+        d['departments'] = sorted(
+            ({'name': name, 'count': len(ids)} for name, ids in d['departments'].items()),
+            key=lambda x: (-x['count'], x['name']),
+        )
+        result.append(d)
+    result.sort(key=lambda d: (-d['patients'], d['name']))
+    return {
+        'doctors': result,
+        'others': {
+            'prescriptions': others['prescriptions'], 'patients': len(others['visits']),
+            'names': sorted(others['names']),
+        },
+    }
+
+
 class VisitStatsView(APIView):
-    """환자 통계 (?mission=) - 소아/성인 × 성별 × 진료과별 환자 수, 전체 방문 수·실제 환자 수"""
+    """
+    환자 통계 (?mission=) - 소아/성인 × 성별 × 진료과별 환자 수, 전체 방문 수·실제 환자 수
+    + daily(날짜별 등록·진료 완료·약 수령) + doctors(의사별 진료 수·진료과별)
+    """
     permission_classes = [IsSuperUser]
 
     def get(self, request):
-        return Response(compute_visit_stats(get_mission_param(request)))
+        mission = get_mission_param(request)
+        doctor_stats = compute_doctor_stats(mission)
+        return Response({
+            **compute_visit_stats(mission),
+            'daily': compute_daily_stats(mission),
+            'doctors': doctor_stats['doctors'],
+            'doctors_others': doctor_stats['others'],   # 진료팀이 아닌 계정이 쓴 처방 (의사별에서 뺀 것)
+        })
 
 
 class DrugStatsView(APIView):
@@ -563,6 +685,43 @@ def add_visit_stats_sheet(wb, stats):
     by_age_sex = {(r['age_group'], r['sex']): r['count'] for r in stats['by_age_sex']}
     values = [by_age_sex[col] for col in AGE_SEX_COLUMNS]
     ws.append(['전체 (방문 기준)', *values, sum(values)])
+
+
+def add_daily_doctor_sheets(wb, daily, doctor_stats):
+    doctors = doctor_stats['doctors']
+    ws = wb.create_sheet('날짜별')
+    ws.append(['날짜', '등록', '진료 완료', '약 수령', '소아', '성인', '남', '여'])
+    keys = ('registered', 'done', 'dispensed', 'child', 'adult', 'male', 'female')
+    for r in daily['rows']:
+        ws.append([str(r['date']), *[r[k] for k in keys]])
+    ws.append(['합계', *[daily['total'][k] for k in keys]])
+
+    ws = wb.create_sheet('날짜별 진료과')
+    headers = [f'{a} {SEX_LABEL[s]}' for a, s in AGE_SEX_COLUMNS]
+    ws.append(['날짜', '진료과', *headers, '합계'])
+    for r in daily['rows']:
+        table = {}
+        for x in r['by_department']:
+            table.setdefault(x['department'], {})[(x['age_group'], x['sex'])] = x['count']
+        for dept, counts in table.items():
+            values = [counts.get(col, 0) for col in AGE_SEX_COLUMNS]
+            ws.append([str(r['date']), dept, *values, sum(values)])
+
+    ws = wb.create_sheet('의사별')
+    ws.append(['의사', '전문과', '진료 환자 수', '처방 건수', '소아', '성인'])
+    for d in doctors:
+        ws.append([d['name'], d['department_code'] or '', d['patients'], d['prescriptions'], d['child'], d['adult']])
+    others = doctor_stats['others']
+    if others['prescriptions']:
+        ws.append([])
+        ws.append([f"진료팀이 아닌 계정({', '.join(others['names'])})이 쓴 처방 {others['prescriptions']}건"
+                   f"(환자 {others['patients']}명)은 의사별에 넣지 않았습니다."])
+
+    ws = wb.create_sheet('의사×진료과')
+    ws.append(['의사', '진료과', '환자 수'])
+    for d in doctors:
+        for dept in d['departments']:
+            ws.append([d['name'], dept['name'], dept['count']])
 
 
 def add_drug_stats_sheets(wb, stats):
@@ -604,6 +763,7 @@ class MissionStockExportView(APIView):
         wb = Workbook()
         wb.remove(wb.active)  # 기본으로 딸려오는 빈 시트 제거
         add_visit_stats_sheet(wb, compute_visit_stats(mission))
+        add_daily_doctor_sheets(wb, compute_daily_stats(mission), compute_doctor_stats(mission))
         add_drug_stats_sheets(wb, compute_drug_stats(mission))
 
         used = dict(
