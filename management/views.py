@@ -17,6 +17,7 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from clinic.drug_excel import DrugImporter, export_workbook
 from clinic.middleware import get_site_time_zone
 from clinic.models import (
     Drug, DrugCategory1, DrugCategory2, DrugBatch, Mission, MissionMembership, MissionStock,
@@ -153,6 +154,38 @@ class DrugViewSet(ProtectedDeleteMixin, viewsets.ModelViewSet):
         if params.get('cat2'):
             qs = qs.filter(cat2_id=params['cat2'])
         return qs
+
+    @action(detail=False, methods=['get'], url_path='export')
+    def export_excel(self, request):
+        """약품 + 창고 배치 → 표준 양식 엑셀 (다시 고쳐서 [엑셀 올리기]로 올릴 수 있다)"""
+        filename = f'약품_창고재고_{timezone.localdate()}.xlsx'
+        response = HttpResponse(
+            export_workbook(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        response['Content-Disposition'] = (
+            f'attachment; filename="drugs_{timezone.localdate()}.xlsx"; filename*=UTF-8\'\'{quote(filename)}'
+        )
+        return response
+
+    @action(detail=False, methods=['post'], url_path='import')
+    def import_excel(self, request):
+        """
+        약품 엑셀 올리기 (multipart: file, commit=1이면 실제로 넣기, 없으면 미리보기).
+        표준 양식·옛 약품 리스트 양식 둘 다. 응답 {committed, format, summary, lines, errors}
+        오류가 하나라도 있으면 아무것도 넣지 않는다 - 미리보기는 200으로 오류 목록을 보여주고, commit이면 400.
+        """
+        upload = request.FILES.get('file')
+        if upload is None:
+            raise ValidationError({'detail': '엑셀 파일을 골라주세요.'})
+        if not upload.name.lower().endswith('.xlsx'):
+            raise ValidationError({'detail': '.xlsx 엑셀 파일만 올릴 수 있습니다. (엑셀에서 "다른 이름으로 저장" → Excel 통합 문서)'})
+        commit = str(request.data.get('commit', '')).lower() in ('1', 'true')
+
+        result = DrugImporter().run(upload, commit=commit)
+        if commit and result['errors']:
+            return Response({**result, 'detail': f'오류 {len(result["errors"])}개 - 아무것도 넣지 않았습니다.'}, status=400)
+        return Response(result)
 
     @action(detail=False, methods=['get'], url_path='category-tree')
     def category_tree(self, request):

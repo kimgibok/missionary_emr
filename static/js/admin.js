@@ -754,6 +754,118 @@ byId('drug-list').addEventListener('click', (e) => {
 });
 
 byId('drug-add-btn').addEventListener('click', () => openDrugModal());
+
+// ----- 약품 엑셀 내려받기 / 올리기 -----
+// 내려받은 파일(표준 양식)을 고쳐서 올리거나, 옛 '약품 리스트' 엑셀을 그대로 올린다.
+// 올리면 먼저 미리보기(DB 그대로) → [가져오기]. 오류가 하나라도 있으면 가져오기를 막는다.
+
+byId('drug-export-btn').addEventListener('click', async () => {
+    const btn = byId('drug-export-btn');
+    btn.disabled = true;
+    btn.textContent = '만드는 중…';
+    try {
+        await apiDownload('/manage/drugs/export/', `drugs_${todayStr()}.xlsx`);
+    } catch (err) {
+        showToast(err.message, true);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '엑셀 내려받기';
+    }
+});
+
+let importFile = null;      // 고른 엑셀 파일 - 미리보기 뒤 [가져오기]에서 같은 파일을 다시 보낸다
+
+function openImportModal() {
+    importFile = null;
+    openModal({
+        title: '약품 엑셀 올리기',
+        bodyHtml: `
+            <p class="modal-note">[엑셀 내려받기]로 받은 파일이나 약품 리스트 엑셀(.xlsx)을 고르세요.
+                먼저 미리보기가 나오고, 확인한 뒤 가져옵니다.</p>
+            <label class="field-label" for="im-file">엑셀 파일 *</label>
+            <input class="field-input" type="file" id="im-file" accept=".xlsx">
+            <p class="error-message" id="im-error"></p>`,
+        confirmLabel: '미리보기',
+        onConfirm: () => { previewImport(); return false; },
+    });
+}
+
+function importResultHtml(result) {
+    const summary = result.summary.length === 0
+        ? '<p class="modal-note">바뀌는 것이 없습니다. (이미 다 들어 있는 파일)</p>'
+        : `<ul class="import-summary">${result.summary.map(([label, count]) =>
+            `<li><span>${escapeHtml(label)}</span><strong>${count}</strong></li>`).join('')}</ul>`;
+    const errors = result.errors.length === 0 ? '' : `
+        <p class="error-message">오류 ${result.errors.length}개 - 고친 뒤 다시 올려 주세요. 하나라도 있으면 아무것도 들어가지 않습니다.</p>
+        <ul class="import-lines is-error">${result.errors.map((e) => `<li>${escapeHtml(e)}</li>`).join('')}</ul>`;
+    const lines = result.lines.length === 0 ? '' : `
+        <details class="import-details"${result.errors.length === 0 && result.lines.length <= 30 ? ' open' : ''}>
+            <summary>자세히 (${result.lines.length}줄)</summary>
+            <ul class="import-lines">${result.lines.map((l) => `<li>${escapeHtml(l)}</li>`).join('')}</ul>
+        </details>`;
+    const format = result.format === 'legacy' ? '<p class="modal-note">약품 리스트 양식으로 읽었습니다.</p>' : '';
+    return format + summary + errors + lines;
+}
+
+async function previewImport() {
+    if (isBusy) return;
+    const errorEl = byId('im-error');
+    const file = byId('im-file').files[0];
+    if (!file) { errorEl.textContent = '엑셀 파일을 골라주세요.'; return; }
+
+    const form = new FormData();
+    form.append('file', file);
+    isBusy = true;
+    errorEl.textContent = '읽는 중…';
+    let result;
+    try {
+        result = await apiUpload('/manage/drugs/import/', form);
+    } catch (err) {
+        errorEl.textContent = err.message;
+        return;
+    } finally {
+        isBusy = false;
+    }
+    importFile = file;
+    const canImport = result.errors.length === 0 && result.summary.length > 0;
+    openModal({
+        title: `미리보기 · ${file.name}`,
+        bodyHtml: `${importResultHtml(result)}
+            <p class="modal-note">아직 아무것도 바뀌지 않았습니다.${canImport ? ' [가져오기]를 누르면 들어갑니다.' : ''}</p>
+            <p class="error-message" id="im-error"></p>`,
+        confirmLabel: canImport ? '가져오기' : '닫기',
+        onConfirm: () => {
+            if (!canImport) return true;
+            commitImport();
+            return false;
+        },
+        wide: true,
+    });
+}
+
+async function commitImport() {
+    if (isBusy || !importFile) return;
+    const form = new FormData();
+    form.append('file', importFile);
+    form.append('commit', '1');
+    isBusy = true;
+    let result;
+    try {
+        result = await apiUpload('/manage/drugs/import/', form);
+    } catch (err) {
+        byId('im-error').textContent = err.message;
+        return;
+    } finally {
+        isBusy = false;
+    }
+    closeModal();
+    importFile = null;
+    showToast(`가져왔습니다: ${result.summary.map(([label, count]) => `${label} ${count}`).join(', ')}`);
+    loadDrugTree();
+    loadDrugs();    // 창고 재고 탭은 열 때마다 새로 받으므로 따로 할 것 없음
+}
+
+byId('drug-import-btn').addEventListener('click', openImportModal);
 byId('drug-search').addEventListener('input', () => {
     clearTimeout(drugSearchTimer);
     drugSearchTimer = setTimeout(loadDrugs, 300);   // 글자마다 요청하지 않게 잠깐 기다린다

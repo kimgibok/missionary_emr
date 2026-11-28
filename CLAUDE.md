@@ -47,7 +47,8 @@ missionary_emr/
 │   ├─ permissions.py       role_permission() 팩토리, get_active_memberships(), 본인 배정·처방 확인용 클래스/함수
 │   ├─ pagination.py        FlexiblePagination (기본 20, ?page_size= 최대 500)
 │   ├─ middleware.py        SiteTimezoneMiddleware - 요청마다 현장 시간대(SiteConfig)를 timezone.activate()
-│   ├─ management/commands/import_drugs.py   약품 리스트 엑셀 → 분류·약품·창고 배치 (기본 미리보기, --commit)
+│   ├─ drug_excel.py        약품 엑셀 가져오기(DrugImporter - 표준 양식·옛 약품 리스트 양식)·내보내기(export_workbook) - 관리자 API와 커맨드 공용
+│   ├─ management/commands/import_drugs.py   drug_excel을 부르는 커맨드 (기본 미리보기, --commit)
 │   ├─ templatetags/static_version.py   {% static_v %} - 정적 파일 주소에 ?v=수정시각 (캐시 자동 갱신)
 │   ├─ serializers.py / views.py / urls.py / admin.py
 ├─ management/              관리자 전용 API (모델 없음, clinic 모델을 import해서 사용)
@@ -59,7 +60,7 @@ missionary_emr/
 │   └─ partials/            nav.html, modal.html, patient_intake_modal.html
 ├─ static/
 │   ├─ css/                 base.css(토큰·공통 컴포넌트), login, nav, page, modal, info, reception, clinical, pharmacy(조제지 인쇄 포함), admin
-│   ├─ js/                  api.js(apiFetch·apiDownload·clearAuth), common.js(escapeHtml·showToast·patientMeta·doctorLabel·byId·todayStr·dateTimeLabel·expiryText),
+│   ├─ js/                  api.js(apiFetch·apiDownload·apiUpload·clearAuth), common.js(escapeHtml·showToast·patientMeta·doctorLabel·byId·todayStr·dateTimeLabel·expiryText),
 │   │                       nav.js, modal.js, login.js, select_mission.js,
 │   │                       patient-intake.js, info.js, reception.js, clinical.js, pharmacy.js, admin.js
 │   └─ fonts/               Pretendard-{Regular,Medium,SemiBold,Bold}.woff2
@@ -156,7 +157,7 @@ superuser는 백엔드 권한을 전부 통과하므로 nav에서 모든 역할 
 | 처방약 수정 | `PATCH prescription-drugs/<pk>/` = 약국팀용(수량만 믿고 재계산 안 함), `PATCH/DELETE prescription-drugs/<pk>/clinical/` = 진료팀용(재계산됨) |
 | 조회용 | `GET departments/`, `drug-categories1/`, `drug-categories2/`, `drugs/` (진료팀 약 검색 - 정산 전·잔량 있는 이번 미션 재고가 있는 약만, 약 하나에 한 줄·잔량은 배치 합계, `?search=&cat1=&cat2=`), `drugs/categories/` (그 약들에 있는 분류 → 세부 분류 트리, 처방 화면 선택지) |
 | 약국 | `GET mission-stocks/`, `GET prescription-drugs/stats/?period=day&date= \| ?period=mission`(수령된 약만: summary·drugs + 미션 기준 runway), `GET visits/pharmacy-queue/`(오늘, 등록번호순), `GET visits/pharmacy-done/`(오늘 수령, 최신순), `GET visits/<id>/dispense-options/`, `POST visits/<id>/dispense/` `{items:[{prescription_drug, mission_stock}]}`, `POST visits/<id>/undispense/`, `POST visits/print-claim/` `{ids}` → `{claimed}` (조제 대기·조제 화면 응답에 `slip_printed_at`, `stock_issues`) |
-| 관리자 `manage/` | `GET missions/`(`is_active`), `GET visits/stats/?mission=`(진료과별 환자 수·전체 방문·실제 환자, 진료 완료 기준 + `daily` 날짜별 등록·진료 완료·약 수령·소아·성인·성별·그날 진료과별(`by_department`) + `doctors` 진료팀 멤버별 환자·처방 수·진료과별 + `doctors_others` 진료팀이 아닌 계정의 처방 건수), `GET drug-stats/?mission=`(분류별·진료과별 사용량, 다음 미션 준비표, 수령 기준), `GET mission-stocks/export/?mission=`(환자 통계·날짜별·날짜별 진료과·의사별·의사×진료과·약 분류별·진료과별·다음 미션 준비표 + `재고-분류` 시트), `GET stock-adjustments/?drugbatch=\|mission_stock=`, `GET drugs/category-tree/`(약품이 있는 분류 → 세부 분류, 개수), `GET/PATCH site-config/` `{time_zone}`(서버 기준 `server_today`·`server_time`·`server_wall`·`utc_offset`, 시각 글자는 서버가 현장 시간대로 만든다), 그리고 라우터 CRUD: `drug-categories1`, `drug-categories2`, `drugs`(`?search=&cat1=&cat2=`), `drug-batches`(`?drug=&search=`, `POST <id>/adjust/`), `mission-stocks`(`?mission=&search=`, `POST <id>/adjust/`, `POST <id>/settle/`, `POST settle-bulk/` `{items:[{id, donated_qty}]}` 하나라도 틀리면 전부 취소). 사용 중인 항목 삭제는 400 |
+| 관리자 `manage/` | `GET missions/`(`is_active`), `GET visits/stats/?mission=`(진료과별 환자 수·전체 방문·실제 환자, 진료 완료 기준 + `daily` 날짜별 등록·진료 완료·약 수령·소아·성인·성별·그날 진료과별(`by_department`) + `doctors` 진료팀 멤버별 환자·처방 수·진료과별 + `doctors_others` 진료팀이 아닌 계정의 처방 건수), `GET drug-stats/?mission=`(분류별·진료과별 사용량, 다음 미션 준비표, 수령 기준), `GET mission-stocks/export/?mission=`(환자 통계·날짜별·날짜별 진료과·의사별·의사×진료과·약 분류별·진료과별·다음 미션 준비표 + `재고-분류` 시트), `GET stock-adjustments/?drugbatch=\|mission_stock=`, `GET drugs/category-tree/`(약품이 있는 분류 → 세부 분류, 개수), `GET drugs/export/`(약품+창고 배치 표준 양식 엑셀), `POST drugs/import/`(multipart `file`, `commit=1`이면 넣기 / 없으면 미리보기 → `{committed, format, summary, lines, errors}`, commit인데 오류면 400), `GET/PATCH site-config/` `{time_zone}`(서버 기준 `server_today`·`server_time`·`server_wall`·`utc_offset`, 시각 글자는 서버가 현장 시간대로 만든다), 그리고 라우터 CRUD: `drug-categories1`, `drug-categories2`, `drugs`(`?search=&cat1=&cat2=`), `drug-batches`(`?drug=&search=`, `POST <id>/adjust/`), `mission-stocks`(`?mission=&search=`, `POST <id>/adjust/`, `POST <id>/settle/`, `POST settle-bulk/` `{items:[{id, donated_qty}]}` 하나라도 틀리면 전부 취소). 사용 중인 항목 삭제는 400 |
 
 권한 클래스(`clinic/permissions.py`): `IsInfoTeam`, `IsReceptionTeam`, `IsClinicalTeam`, `IsPharmacyTeam`와 조합용(`IsInfoOrReceptionTeam` 등).
 모두 `role_permission(*역할이름)` 팩토리로 만들며, **superuser는 항상 통과**한다. 역할 이름 문자열('안내팀', '접수팀', '진료팀', '약국팀')은 DB의 `Role.name`과 정확히 같아야 한다.
@@ -187,7 +188,7 @@ POST처럼 대상 객체가 없는 요청은 뷰의 `perform_create`에서 `owns
 
 **프론트엔드**
 - API 호출은 반드시 `static/js/api.js`의 `apiFetch()`를 거친다(토큰 부착, 401이면 로그인 화면으로, 오류 메시지 가공).
-  엑셀처럼 파일을 받을 때는 `apiDownload(path, 기본파일명)`을 쓴다(파일명은 서버의 `filename*=UTF-8''…`).
+  엑셀처럼 파일을 받을 때는 `apiDownload(path, 기본파일명)`을 쓴다(파일명은 서버의 `filename*=UTF-8''…`). 파일을 올릴 때는 `apiUpload(path, formData)`(Content-Type은 브라우저가 정함).
 - 로그아웃·토큰 만료 때는 `clearAuth()`(api.js, 로그인 키만)로 지운다. `localStorage.clear()`는 쓰지 않는다 - 약국 출력 PC의 [자동 출력]·용지, 마지막 탭 같은 기기 설정까지 지워진다.
   401이면 `goLoginExpired()`가 로그인 화면으로 보내고, 로그인 화면이 "로그인이 만료되었습니다"를 크게 보여준다(sessionStorage `auth_expired`).
 - 요약 숫자 칸(`.stats-summary` / `.stat-tile`)과 통계 표(`.stats-table`, 숫자 칸 `.stats-qty`, 열이 많으면 `.table-scroll`로 감싸 폰에서 가로 스크롤)는 `base.css` 공용이다.
@@ -250,9 +251,13 @@ POST처럼 대상 객체가 없는 요청은 뷰의 `perform_create`에서 `owns
 
 **관리자 요청 (2026-11-28, 순서대로)**
 1. 통계 PDF + 날짜별(날짜별 진료과)·의사별 통계 + 통계 종류 드롭다운 → `feature/admin-stats-tabs`
-2. 약 엑셀 import·export를 관리자 화면에서(비개발자용). [약품] 탭 [엑셀 내려받기] = 표준 양식(분류마다 시트, 배치 한 줄) / [엑셀 올리기] = 미리보기 → 가져오기(오류 하나라도 있으면 전부 취소), 옛 '약품 리스트' 양식도 받음.
-   `import_drugs`의 읽기·넣기를 공용 모듈로 빼서 커맨드와 API(`POST manage/drugs/import/`, `GET manage/drugs/export/`)가 같이 쓴다. 파일 올리기는 `api.js`에 `apiUpload()` 추가.
-   결정: 다시 올렸을 때 기존 배치가 임시 유통기한이고 약품·출처·포장·입고량이 같으면 **유통기한만 고친다** / 입고량·잔량이 다르면 **고치지 않고 '다른 줄'로 알려만 준다**(재고 숫자는 [잔량 보정]으로만).
+2. 약 엑셀 import·export를 관리자 화면에서(비개발자용) → `feature/drug-excel-io`. [약품] 탭 [엑셀 내려받기] / [엑셀 올리기](미리보기 → 가져오기).
+   표준 양식 = '사용법' 시트 + **분류 = 시트**('약속처방 - OS'처럼 ' - '가 있는 분류는 '약속처방' 한 시트로 묶고 그 시트에만 맨 앞 '분류' 열).
+   열: 세부 분류·약품명·성분·용법·포장 단위 수량·단위·창고 잔량·입고량·유통기한·입고일·출처·출처 상세·배치 번호(**숨긴 열** - 기존 배치를 알아보는 데 씀).
+   열은 머리줄 글자로 찾는다(순서 바꿔도 됨). 시트 이름이 없는 분류면 새 분류가 된다.
+   임시 유통기한은 빈 칸으로 내보낸다. 배치 번호가 있는 줄 = 기존 배치: 미확인이면 유통기한만 채우고, 입고량·잔량·출처 등이 다르면 **고치지 않고 '다름'으로 알려만 준다**(재고 숫자는 [잔량 보정]으로만).
+   배치 번호 없는 줄 = 새 입고(같은 배치면 건너뜀, 같은 약품·출처·포장·입고량의 미확인 배치가 있으면 유통기한만 채움). 엑셀 유통기한이 비면 유통기한은 빼고 같은 배치인지 본다(날짜를 채운 배치를 옛 엑셀로 다시 넣어도 두 번 안 들어감).
+   오류는 줄마다 전부 모아 한 번에 보여주고, 하나라도 있으면 아무것도 넣지 않는다. 옛 '약품 리스트' 양식도 그대로 받는다(같은 코드).
 3. 약 정보 자동 채우기 - 결정: **(a) 준비할 때만 온라인 조회**. [약품] 모달 [약 정보 찾기] → 식약처 공공데이터 API(data.go.kr, 키는 `local_settings.py`)로 이름 검색 → 사람이 결과를 골라 성분·용법을 채운다. 인터넷이 없으면 버튼만 '인터넷 연결 필요'로 꺼진다.
    '인터넷이 필요한 기능은 쓰지 않는다' 규칙의 **유일한 예외**(현장 업무에는 쓰지 않는 준비용 기능). 만들기 전에 API 이름·항목을 실제 문서로 확인한다. 약학정보원은 공개 API가 아닐 수 있어 제외.
 
@@ -285,7 +290,7 @@ POST처럼 대상 객체가 없는 요청은 뷰의 `perform_create`에서 `owns
     칩 줄 오른쪽 [성분 보기]를 켜면 약품명 아래에 성분이 보인다(두 탭 공용 설정, localStorage `admin_show_ingredient`).
   - 약 통계(미션 선택 가능, 엑셀 포함): 분류(cat1·cat2)별·진료과별 사용량, 그리고 다음 미션 준비표(약마다 챙겨 간 양·쓴 양·남은 양·하루 평균).
     약국 화면은 "오늘 일하는 화면", 관리자는 "돌아보고 다음 미션을 계획하는 화면"으로 나눈다. 약국팀장도 필요하면 같은 API를 약국 탭에 붙인다.
-- 약품 가져오기 `import_drugs` 완료(PR #24, 실제 DB에 넣음 - 약품 77종·배치 86개): `python manage.py import_drugs "db/약품_리스트_아가페_2026_약품분류용1.xlsx"`(미리보기) → `--commit`.
+- 약품 가져오기 `import_drugs` 완료(PR #24, 실제 DB에 넣음 - 약품 77종·배치 86개, 읽기·넣기는 `clinic/drug_excel.py`로 옮김): `python manage.py import_drugs "db/약품_리스트_아가페_2026_약품분류용1.xlsx"`(미리보기) → `--commit`.
   시트 '2026-경구' → 분류 '경구', '분류' 열 → 세부 분류(띄어쓰기 무시하고 기존 이름 사용, '외용약'→'외용'), 한 줄 = 창고 배치. 같은 배치는 다시 넣지 않아 두 번 돌려도 안전하다.
   출처 기본 후원·입고일 기본 오늘(`--source`, `--received-date`). 약속처방 세트 = 약 하나('약속처방(OS)', 단위 포). 소아 시럽은 수량이 없어 1병씩.
   복용스케줄: 경구·비타민 켬, 소아(시럽, 병 단위)·외용·주사제·추가약 끔 - 커맨드가 기존 분류 값도 맞춘다.

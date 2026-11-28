@@ -743,3 +743,54 @@
         display: none;
     }
 }
+
+
+/* ---------- 약품 엑셀 올리기 - 미리보기 결과 (모달) ---------- */
+.import-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 6px;
+    margin: 0 0 12px;
+    padding: 0;
+    list-style: none;
+}
+
+.import-summary li {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 12px;
+    background: var(--color-bg);
+    border-radius: 10px;
+    font-size: 13px;
+}
+
+.import-summary strong {
+    font-variant-numeric: tabular-nums;
+}
+
+.import-details summary {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.import-lines {
+    max-height: 260px;
+    overflow-y: auto;
+    margin: 0 0 12px;
+    padding: 8px 12px;
+    background: var(--color-bg);
+    border-radius: 10px;
+    list-style: none;
+    font-size: 12px;
+    line-height: 1.6;
+    font-variant-numeric: tabular-nums;
+}
+
+.import-lines.is-error {
+    color: var(--color-danger);
+}
