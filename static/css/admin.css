@@ -73,6 +73,62 @@
     margin-bottom: 0;
 }
 
+/* 엑셀·PDF 버튼 */
+.stats-head-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* 통계 종류 드롭다운 */
+.stats-view-bar {
+    max-width: 320px;
+    margin-bottom: 16px;
+}
+
+.stats-view-bar .field-input {
+    margin-bottom: 0;
+}
+
+/* 날짜별 카드 머리의 날짜 드롭다운 */
+.card-head .daily-date-select {
+    width: auto;
+    min-width: 220px;
+    margin: 0;
+}
+
+/* 고른 날짜의 요약 숫자 - 카드 안이라 아래 여백만 */
+#daily-day-summary {
+    margin-bottom: 14px;
+}
+
+/* 인쇄용 날짜별 전체(요약 + 날짜마다 진료과 표) - 화면에서는 숨김 */
+.daily-print-all {
+    display: none;
+}
+
+/* '전체 기간'의 날짜별 요약표 제목 */
+.daily-sub-title {
+    margin: 22px 0 6px;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+/* 의사별 - 진료팀이 아닌 계정이 쓴 처방 안내 */
+.doctor-others-note {
+    margin-bottom: 8px;
+}
+
+.daily-print-date {
+    margin: 14px 0 4px;
+    font-size: 13px;
+}
+
+/* PDF(인쇄)에만 보이는 머리말 */
+.print-head {
+    display: none;
+}
+
 /* 카드 머리에 들어가는 작은 탭 (분류 / 세부 분류) */
 .tab-bar.mini-tabs {
     margin: 0;
@@ -599,4 +655,91 @@
     margin-top: 10px;
     font-size: 13px;
     color: var(--color-text-muted);
+}
+
+
+/* ---------- 통계 PDF로 저장 (브라우저 인쇄) ----------
+   통계 탭만 A4로: 메뉴·버튼·탭은 숨기고, 작은 탭과 상관없이 통계 전부를 이어서 찍는다.
+   [hidden]은 base.css에서 !important라, 더 구체적인 선택자 + !important로 다시 보이게 한다 */
+@media print {
+    @page {
+        size: A4;
+        margin: 14mm;
+    }
+
+    body {
+        background: var(--color-surface);
+    }
+
+    .top-nav,
+    .page-content > h1,
+    #main-tabs,
+    #mission-bar,
+    .stats-head,
+    .stats-view-bar,
+    .daily-date-select,
+    .daily-screen,
+    .mini-tabs,
+    .toast,
+    .section-hint {
+        display: none !important;
+    }
+
+    .page-content {
+        padding: 0;
+        max-width: none;
+    }
+
+    .print-head {
+        display: block;
+        margin-bottom: 12px;
+    }
+
+    .print-head h1 {
+        font-size: 18px;
+        margin: 0 0 2px;
+    }
+
+    .print-head p {
+        font-size: 12px;
+        color: var(--color-text-muted);
+    }
+
+    #tab-stats .stats-panel[hidden] {
+        display: block !important;
+    }
+
+    .daily-print-all {
+        display: block;
+    }
+
+    #tab-stats .card {
+        box-shadow: none;
+        border: 1px solid var(--color-border);
+        padding: 12px 14px;
+        margin-bottom: 10px;
+        break-inside: avoid;
+    }
+
+    /* 가로 스크롤 표도 종이 폭에 맞춘다 */
+    #tab-stats .table-scroll {
+        overflow: visible;
+    }
+
+    #tab-stats .table-scroll .stats-table {
+        min-width: 0;
+    }
+
+    #tab-stats .stats-table {
+        font-size: 11px;
+    }
+
+    #tab-stats .stats-table th,
+    #tab-stats .stats-table td {
+        padding: 4px 3px;
+    }
+
+    #tab-stats .dept-row summary::before {
+        display: none;
+    }
 }

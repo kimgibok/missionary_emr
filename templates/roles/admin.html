@@ -34,47 +34,98 @@
         <div class="tab-panel" id="tab-stats" role="tabpanel" hidden>
             <div class="stats-head">
                 <p class="section-hint" id="stats-mission-label"></p>
-                <button class="btn-primary btn-inline" type="button" id="stats-export-btn">엑셀 다운로드</button>
+                <div class="stats-head-actions">
+                    <button class="btn-secondary btn-small" type="button" id="stats-print-btn">PDF로 저장</button>
+                    <button class="btn-primary btn-inline" type="button" id="stats-export-btn">엑셀 다운로드</button>
+                </div>
             </div>
 
-            <div class="stats-summary" id="admin-stats-summary"></div>
+            <!-- PDF(인쇄)에만 보이는 머리말 - 미션 이름·출력 시각은 admin.js가 채운다 -->
+            <div class="print-head" id="stats-print-head"></div>
 
-            <section class="card">
-                <div class="card-head">
-                    <h2 class="card-title">진료과별 환자 수</h2>
-                </div>
-                <p class="section-hint">진료 완료된 처방 기준입니다. 두 과를 본 환자는 각 과에 1명씩 세므로, 과별 합계가 전체보다 클 수 있습니다.</p>
-                <div class="table-scroll" id="visit-stats-table"></div>
-            </section>
+            <!-- 통계 종류 고르기. PDF로 저장하면 고른 것과 상관없이 전부 찍힌다 -->
+            <div class="stats-view-bar">
+                <label class="field-label" for="stats-view">통계 종류</label>
+                <select class="field-input" id="stats-view">
+                    <option value="patients">환자 (진료과별)</option>
+                    <option value="daily">날짜별</option>
+                    <option value="doctors">의사별</option>
+                    <option value="drugs">약 사용</option>
+                    <option value="prep">다음 미션 준비</option>
+                </select>
+            </div>
 
-            <section class="card">
-                <div class="card-head">
-                    <h2 class="card-title">약 사용량 · 분류별</h2>
-                    <div class="tab-bar mini-tabs" id="category-tabs" role="radiogroup" aria-label="분류 단계">
-                        <button type="button" class="tab-button" data-level="cat1">분류</button>
-                        <button type="button" class="tab-button" data-level="cat2">세부 분류</button>
+            <div class="stats-panel" data-stats-panel="patients">
+                <div class="stats-summary" id="admin-stats-summary"></div>
+                <section class="card">
+                    <div class="card-head">
+                        <h2 class="card-title">진료과별 환자 수</h2>
                     </div>
-                </div>
-                <p class="section-hint">약국에서 수령 처리된 약 기준입니다.</p>
-                <div id="category-stats-table"></div>
-            </section>
+                    <p class="section-hint">진료 완료된 처방 기준입니다. 두 과를 본 환자는 각 과에 1명씩 세므로, 과별 합계가 전체보다 클 수 있습니다.</p>
+                    <div class="table-scroll" id="visit-stats-table"></div>
+                </section>
+            </div>
 
-            <section class="card">
-                <div class="card-head">
-                    <h2 class="card-title">약 사용량 · 진료과별</h2>
-                </div>
-                <p class="section-hint">진료과를 누르면 그 과에서 쓴 약이 보입니다.</p>
-                <div id="department-stats"></div>
-            </section>
+            <div class="stats-panel" data-stats-panel="daily" hidden>
+                <section class="card">
+                    <div class="card-head">
+                        <h2 class="card-title">날짜별 환자 수</h2>
+                        <select class="field-input daily-date-select" id="daily-date" aria-label="날짜 고르기"></select>
+                    </div>
+                    <p class="section-hint">등록 = 안내팀 방문 등록, 진료 완료 = 진료가 끝난 환자, 약 수령 = 약국에서 수령 처리된 환자입니다.
+                        소아·성인·성별과 진료과 표는 진료 완료 기준입니다. 날짜를 고르면 그날의 진료과별 환자 수가 보입니다.</p>
+                    <!-- 화면: 고른 날짜(또는 전체 요약) / 인쇄: 전체 요약 + 날짜마다 진료과 표 -->
+                    <div class="daily-screen">
+                        <div class="stats-summary" id="daily-day-summary" hidden></div>
+                        <div class="table-scroll" id="daily-stats-table"></div>
+                    </div>
+                    <div class="daily-print-all" id="daily-print-all"></div>
+                </section>
+            </div>
 
-            <section class="card">
-                <div class="card-head">
-                    <h2 class="card-title">다음 미션 준비표</h2>
-                    <span class="count-badge" id="prep-days">진료한 날 0일</span>
-                </div>
-                <p class="section-hint">약마다 챙겨 간 양 · 쓴 양 · 남은 양입니다. 하루 평균은 수령 처리가 있던 날 기준입니다.</p>
-                <div class="table-scroll" id="prep-table"></div>
-            </section>
+            <div class="stats-panel" data-stats-panel="doctors" hidden>
+                <section class="card">
+                    <div class="card-head">
+                        <h2 class="card-title">의사별 진료 수</h2>
+                    </div>
+                    <p class="section-hint">진료 완료된 처방 기준입니다. 의사를 누르면 그 의사가 처방한 진료과별 환자 수가 보입니다.
+                        두 의사가 본 환자는 각 의사에게 1명씩 셉니다.</p>
+                    <div id="doctor-stats"></div>
+                </section>
+            </div>
+
+            <div class="stats-panel" data-stats-panel="drugs" hidden>
+                <section class="card">
+                    <div class="card-head">
+                        <h2 class="card-title">약 사용량 · 분류별</h2>
+                        <div class="tab-bar mini-tabs" id="category-tabs" role="radiogroup" aria-label="분류 단계">
+                            <button type="button" class="tab-button" data-level="cat1">분류</button>
+                            <button type="button" class="tab-button" data-level="cat2">세부 분류</button>
+                        </div>
+                    </div>
+                    <p class="section-hint">약국에서 수령 처리된 약 기준입니다.</p>
+                    <div id="category-stats-table"></div>
+                </section>
+
+                <section class="card">
+                    <div class="card-head">
+                        <h2 class="card-title">약 사용량 · 진료과별</h2>
+                    </div>
+                    <p class="section-hint">진료과를 누르면 그 과에서 쓴 약이 보입니다.</p>
+                    <div id="department-stats"></div>
+                </section>
+            </div>
+
+            <div class="stats-panel" data-stats-panel="prep" hidden>
+                <section class="card">
+                    <div class="card-head">
+                        <h2 class="card-title">다음 미션 준비표</h2>
+                        <span class="count-badge" id="prep-days">진료한 날 0일</span>
+                    </div>
+                    <p class="section-hint">약마다 챙겨 간 양 · 쓴 양 · 남은 양입니다. 하루 평균은 수령 처리가 있던 날 기준입니다.</p>
+                    <div class="table-scroll" id="prep-table"></div>
+                </section>
+            </div>
         </div>
 
         <!-- ===== 미션 재고 ===== -->

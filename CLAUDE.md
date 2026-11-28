@@ -156,7 +156,7 @@ superuser는 백엔드 권한을 전부 통과하므로 nav에서 모든 역할 
 | 처방약 수정 | `PATCH prescription-drugs/<pk>/` = 약국팀용(수량만 믿고 재계산 안 함), `PATCH/DELETE prescription-drugs/<pk>/clinical/` = 진료팀용(재계산됨) |
 | 조회용 | `GET departments/`, `drug-categories1/`, `drug-categories2/`, `drugs/` (진료팀 약 검색 - 정산 전·잔량 있는 이번 미션 재고가 있는 약만, 약 하나에 한 줄·잔량은 배치 합계, `?search=&cat1=&cat2=`), `drugs/categories/` (그 약들에 있는 분류 → 세부 분류 트리, 처방 화면 선택지) |
 | 약국 | `GET mission-stocks/`, `GET prescription-drugs/stats/?period=day&date= \| ?period=mission`(수령된 약만: summary·drugs + 미션 기준 runway), `GET visits/pharmacy-queue/`(오늘, 등록번호순), `GET visits/pharmacy-done/`(오늘 수령, 최신순), `GET visits/<id>/dispense-options/`, `POST visits/<id>/dispense/` `{items:[{prescription_drug, mission_stock}]}`, `POST visits/<id>/undispense/`, `POST visits/print-claim/` `{ids}` → `{claimed}` (조제 대기·조제 화면 응답에 `slip_printed_at`, `stock_issues`) |
-| 관리자 `manage/` | `GET missions/`(`is_active`), `GET visits/stats/?mission=`(진료과별 환자 수·전체 방문·실제 환자, 진료 완료 기준), `GET drug-stats/?mission=`(분류별·진료과별 사용량, 다음 미션 준비표, 수령 기준), `GET mission-stocks/export/?mission=`(통계 시트 4개 + `재고-분류` 시트), `GET stock-adjustments/?drugbatch=\|mission_stock=`, `GET drugs/category-tree/`(약품이 있는 분류 → 세부 분류, 개수), `GET/PATCH site-config/` `{time_zone}`(서버 기준 `server_today`·`server_time`·`server_wall`·`utc_offset`, 시각 글자는 서버가 현장 시간대로 만든다), 그리고 라우터 CRUD: `drug-categories1`, `drug-categories2`, `drugs`(`?search=&cat1=&cat2=`), `drug-batches`(`?drug=&search=`, `POST <id>/adjust/`), `mission-stocks`(`?mission=&search=`, `POST <id>/adjust/`, `POST <id>/settle/`, `POST settle-bulk/` `{items:[{id, donated_qty}]}` 하나라도 틀리면 전부 취소). 사용 중인 항목 삭제는 400 |
+| 관리자 `manage/` | `GET missions/`(`is_active`), `GET visits/stats/?mission=`(진료과별 환자 수·전체 방문·실제 환자, 진료 완료 기준 + `daily` 날짜별 등록·진료 완료·약 수령·소아·성인·성별·그날 진료과별(`by_department`) + `doctors` 진료팀 멤버별 환자·처방 수·진료과별 + `doctors_others` 진료팀이 아닌 계정의 처방 건수), `GET drug-stats/?mission=`(분류별·진료과별 사용량, 다음 미션 준비표, 수령 기준), `GET mission-stocks/export/?mission=`(환자 통계·날짜별·날짜별 진료과·의사별·의사×진료과·약 분류별·진료과별·다음 미션 준비표 + `재고-분류` 시트), `GET stock-adjustments/?drugbatch=\|mission_stock=`, `GET drugs/category-tree/`(약품이 있는 분류 → 세부 분류, 개수), `GET/PATCH site-config/` `{time_zone}`(서버 기준 `server_today`·`server_time`·`server_wall`·`utc_offset`, 시각 글자는 서버가 현장 시간대로 만든다), 그리고 라우터 CRUD: `drug-categories1`, `drug-categories2`, `drugs`(`?search=&cat1=&cat2=`), `drug-batches`(`?drug=&search=`, `POST <id>/adjust/`), `mission-stocks`(`?mission=&search=`, `POST <id>/adjust/`, `POST <id>/settle/`, `POST settle-bulk/` `{items:[{id, donated_qty}]}` 하나라도 틀리면 전부 취소). 사용 중인 항목 삭제는 400 |
 
 권한 클래스(`clinic/permissions.py`): `IsInfoTeam`, `IsReceptionTeam`, `IsClinicalTeam`, `IsPharmacyTeam`와 조합용(`IsInfoOrReceptionTeam` 등).
 모두 `role_permission(*역할이름)` 팩토리로 만들며, **superuser는 항상 통과**한다. 역할 이름 문자열('안내팀', '접수팀', '진료팀', '약국팀')은 DB의 `Role.name`과 정확히 같아야 한다.
@@ -248,6 +248,14 @@ POST처럼 대상 객체가 없는 요청은 뷰의 `perform_create`에서 `owns
   3. **현장 배포 준비** - `config/local_settings.py`(`DEBUG = False`, 새 `SECRET_KEY`, `ALLOWED_HOSTS`), 조제지 영수증 프린터 실기기 확인.
   4. **운영 시작 전 DB 새로 시작** - 테스트가 다 끝난 뒤(아래 '다음 작업' 참고).
 
+**관리자 요청 (2026-11-28, 순서대로)**
+1. 통계 PDF + 날짜별(날짜별 진료과)·의사별 통계 + 통계 종류 드롭다운 → `feature/admin-stats-tabs`
+2. 약 엑셀 import·export를 관리자 화면에서(비개발자용). [약품] 탭 [엑셀 내려받기] = 표준 양식(분류마다 시트, 배치 한 줄) / [엑셀 올리기] = 미리보기 → 가져오기(오류 하나라도 있으면 전부 취소), 옛 '약품 리스트' 양식도 받음.
+   `import_drugs`의 읽기·넣기를 공용 모듈로 빼서 커맨드와 API(`POST manage/drugs/import/`, `GET manage/drugs/export/`)가 같이 쓴다. 파일 올리기는 `api.js`에 `apiUpload()` 추가.
+   결정: 다시 올렸을 때 기존 배치가 임시 유통기한이고 약품·출처·포장·입고량이 같으면 **유통기한만 고친다** / 입고량·잔량이 다르면 **고치지 않고 '다른 줄'로 알려만 준다**(재고 숫자는 [잔량 보정]으로만).
+3. 약 정보 자동 채우기 - 결정: **(a) 준비할 때만 온라인 조회**. [약품] 모달 [약 정보 찾기] → 식약처 공공데이터 API(data.go.kr, 키는 `local_settings.py`)로 이름 검색 → 사람이 결과를 골라 성분·용법을 채운다. 인터넷이 없으면 버튼만 '인터넷 연결 필요'로 꺼진다.
+   '인터넷이 필요한 기능은 쓰지 않는다' 규칙의 **유일한 예외**(현장 업무에는 쓰지 않는 준비용 기능). 만들기 전에 API 이름·항목을 실제 문서로 확인한다. 약학정보원은 공개 API가 아닐 수 있어 제외.
+
 **다음 미션**: 2027년 2월 마다가스카르(시간대 `Indian/Antananarivo`). 준비는 1월부터 하므로 DB의 미션 기간은 1월로 잡아 두었다. 지금은 테스트 기간이다.
 
 **다음 작업**
@@ -261,6 +269,11 @@ POST처럼 대상 객체가 없는 요청은 뷰의 `perform_create`에서 `owns
 - 관리자 프론트엔드 완료 (PR #22, #25) — 1단계 백엔드 정리 완료(재고 규칙·보정 이력·통계·엑셀)
   - 2단계 화면 골격 완료: 탭 [통계 | 미션 재고 | 창고 재고 | 약품 | 설정], 미션 칩(통계·미션 재고 탭에서만, 진행중 먼저, 고른 미션 기억)
   - 3단계 통계 탭 완료: 요약 4칸, 진료과 × 소아/성인 × 성별 표, 약 분류(분류/세부 분류)·진료과별(펼치면 약 목록) 사용량, 다음 미션 준비표, 엑셀 다운로드(`apiDownload`)
+    통계 종류 드롭다운(`#stats-view`, 마지막 선택 기억): 환자(진료과별) / 날짜별 / 의사별 / 약 사용 / 다음 미션 준비.
+    날짜별 = 날짜 드롭다운(`#daily-date`, 기본 = 가장 최근 진료 날짜) - 그날 숫자 4칸(등록·진료 완료·약 수령·소아/성인) + 진료과 × 소아/성인 × 성별 표(`deptAgeSexTableHtml`, 환자 통계와 공용).
+      맨 아래 '전체 기간' = 전체 진료과 표 + 날짜마다 등록·진료 완료·약 수령 요약표.
+    의사별 = 이번 미션 **진료팀 멤버만** 환자·처방 수(펼치면 진료과별). 진료팀이 아닌 계정(관리자 테스트 등)이 쓴 처방은 빼고 건수만 안내(`doctors_others`).
+    [PDF로 저장] = 브라우저 인쇄(admin.css `@media print`) - 고른 것과 상관없이 통계 전부(날짜별은 요약표 + 날짜마다 진료과 표), 펼치는 줄도 펼쳐서 A4로. 라이브러리 없음(오프라인 OK).
   - 4단계 약품 탭 완료: 약품 검색·분류 필터·추가·수정·삭제(모달), 분류·세부 분류 추가·수정·삭제(분류는 복용스케줄 입력 여부). 목록 한 줄은 `.admin-row`, 삭제 확인은 `confirmDelete()`
     약품 필터는 `manage/drugs/category-tree/`로 약품이 있는 분류만 개수와 함께 보이고, 분류를 고르면 그 안의 세부 분류만 나온다(추가·수정 모달의 세부 분류는 전부 - 새 약은 아직 안 쓰인 조합도 필요).
   - 5-1단계 창고 재고 탭 완료: 입고 추가·수정·삭제(약품 분류별 선택), 출처·잔량 필터, 잔량 보정(`openAdjustModal`)·보정 이력(`openHistoryModal`) - 두 모달은 미션 재고와 공용
