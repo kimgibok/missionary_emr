@@ -205,9 +205,13 @@
                     <h2 class="card-title">약품</h2>
                     <div class="card-head-side">
                         <span class="count-badge" id="drug-count">0종</span>
+                        <button class="btn-secondary btn-small" type="button" id="drug-export-btn">엑셀 내려받기</button>
+                        <button class="btn-secondary btn-small" type="button" id="drug-import-btn">엑셀 올리기</button>
                         <button class="btn-primary btn-inline" type="button" id="drug-add-btn">약품 추가</button>
                     </div>
                 </div>
+                <p class="section-hint">[엑셀 내려받기]로 받은 파일에 새 입고를 적거나 미확인 유통기한을 채워 [엑셀 올리기]로 올리면 한 번에 들어갑니다.
+                    파일의 '사용법' 시트에 규칙이 있습니다.</p>
                 <div class="admin-filters">
                     <input class="field-input" type="search" id="drug-search" placeholder="약품명·성분으로 찾기">
                     <select class="field-input" id="drug-filter-cat1" aria-label="분류로 거르기"></select>

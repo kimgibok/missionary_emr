@@ -88,6 +88,34 @@ async function apiFetch(path, options = {}) {
 }
 // 파일 받기 (엑셀 등) - apiFetch처럼 토큰을 붙이고 401이면 로그인 화면으로, 오류는 메시지로 바꿔 던진다.
 // 파일 이름은 서버의 Content-Disposition(filename*=UTF-8''...)을 쓰고, 없으면 fallbackName.
+// 파일 올리기 (엑셀 등) - formData를 그대로 보낸다. Content-Type은 브라우저가 정한다(multipart 경계 포함).
+// 토큰·401 처리·오류 메시지는 apiFetch와 같다. 응답 JSON을 돌려주고, 실패하면 Error.data에 응답 JSON을 담는다.
+async function apiUpload(path, formData) {
+    const token = getToken();
+    const response = await fetch(`${API_BASE}${path}`, {
+        method: 'POST',
+        headers: token ? { Authorization: `Token ${token}` } : {},
+        body: formData,
+    });
+    if (response.status === 401) {
+        goLoginExpired();
+        throw new Error('로그인이 만료되었습니다. 다시 로그인해주세요.');
+    }
+    let data = null;
+    try {
+        data = await response.json();
+    } catch {
+        data = null;
+    }
+    if (!response.ok) {
+        const err = new Error(data ? formatApiError(data) : `서버 오류가 발생했습니다. (${response.status}) 잠시 후 다시 시도해주세요.`);
+        err.data = data;
+        throw err;
+    }
+    if (data === null) throw new Error('서버 응답을 읽을 수 없습니다. 잠시 후 다시 시도해주세요.');
+    return data;
+}
+
 async function apiDownload(path, fallbackName) {
     const token = getToken();
     const response = await fetch(`${API_BASE}${path}`, {
