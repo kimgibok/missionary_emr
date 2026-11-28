@@ -24,6 +24,7 @@ from clinic.models import (
     Prescription, PrescriptionDrug, SiteConfig, StockAdjustment, Visit,
 )
 
+from . import mfds
 from .permissions import IsSuperUser
 from .serializers import (
     DrugCategory1Serializer, DrugCategory2Serializer, DrugSerializer, DrugBatchSerializer,
@@ -181,8 +182,10 @@ class DrugViewSet(ProtectedDeleteMixin, viewsets.ModelViewSet):
         if not upload.name.lower().endswith('.xlsx'):
             raise ValidationError({'detail': '.xlsx 엑셀 파일만 올릴 수 있습니다. (엑셀에서 "다른 이름으로 저장" → Excel 통합 문서)'})
         commit = str(request.data.get('commit', '')).lower() in ('1', 'true')
+        # 식약처에서 비어 있는 성분·용법 채우기 (인터넷 필요) - 이름이 딱 맞는 품목만
+        use_mfds = str(request.data.get('mfds', '')).lower() in ('1', 'true') and mfds.is_enabled()
 
-        result = DrugImporter().run(upload, commit=commit)
+        result = DrugImporter(lookup=mfds.auto_fill_values if use_mfds else None).run(upload, commit=commit)
         if commit and result['errors']:
             return Response({**result, 'detail': f'오류 {len(result["errors"])}개 - 아무것도 넣지 않았습니다.'}, status=400)
         return Response(result)
@@ -372,6 +375,58 @@ class StockAdjustmentListView(generics.ListAPIView):
         if params.get('mission_stock'):
             return qs.filter(mission_stock_id=params['mission_stock'])
         raise ValidationError({'detail': 'drugbatch 또는 mission_stock 쿼리 파라미터가 필요합니다.'})
+
+
+# =====================================================
+# 약 정보 찾기 - 식약처 의약품 제품 허가정보 API (준비할 때만 쓰는 인터넷 기능, management/mfds.py)
+# =====================================================
+
+class DrugInfoStatusView(APIView):
+    """[약 정보 찾기]를 쓸 수 있는지 - 인증키가 설정됐는지만 본다(인터넷 연결은 찾을 때 확인)"""
+    permission_classes = [IsSuperUser]
+
+    def get(self, request):
+        return Response({'enabled': mfds.is_enabled()})
+
+
+class DrugInfoSearchView(APIView):
+    """품목명으로 식약처 허가 품목 찾기 (?q=) → 최대 20개. 인터넷이 없으면 503 + 안내 문구"""
+    permission_classes = [IsSuperUser]
+
+    def get(self, request):
+        query = request.query_params.get('q', '').strip()
+        if len(query) < 2:
+            raise ValidationError({'detail': '약 이름을 두 글자 이상 입력해 주세요.'})
+        try:
+            return Response({'results': mfds.search(query)})
+        except mfds.MfdsError as err:
+            return Response({'detail': str(err)}, status=err.status)
+
+
+class DrugInfoMatchView(APIView):
+    """
+    우리 약 하나(?drug=<id>)에 맞는 식약처 품목 후보 - [식약처에서 한꺼번에 찾기]가 약마다 부른다.
+    {drug_id, query, status: exact|likely|multiple|none, candidates, best}
+    """
+    permission_classes = [IsSuperUser]
+
+    def get(self, request):
+        drug = get_object_or_404(Drug, pk=request.query_params.get('drug') or 0)
+        try:
+            return Response({'drug_id': drug.id, **mfds.match(drug.name)})
+        except mfds.MfdsError as err:
+            return Response({'detail': str(err)}, status=err.status)
+
+
+class DrugInfoDetailView(APIView):
+    """식약처 품목 하나의 상세 → 성분·용법·주성분 코드 등 약품 칸에 넣을 값 + 참고 정보"""
+    permission_classes = [IsSuperUser]
+
+    def get(self, request, item_seq):
+        try:
+            return Response(mfds.detail(item_seq))
+        except mfds.MfdsError as err:
+            return Response({'detail': str(err)}, status=err.status)
 
 
 # =====================================================

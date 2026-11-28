@@ -236,11 +236,15 @@ class DrugImporter:
     result = importer.run(file, commit=False)   # 미리보기
     result = {'committed', 'summary': [[이름, 건수], ...], 'lines': [...], 'errors': [...], 'format'}
     source·received는 옛 양식과, 표준 양식에서 출처·입고일 칸이 빈 새 배치에 쓴다.
+    lookup: 식약처 자동 채우기 함수(약 이름 → (상태, 상세 또는 None, 후보 수)) - 관리자 API가 management.mfds의 것을 넘겨준다.
+            주면 식약처에 연결 안 됐고 성분·용법이 빈 약을 찾아, 이름이 딱 맞는 품목이면 빈 칸만 채운다.
     """
 
-    def __init__(self, source='donation', received=None):
+    def __init__(self, source='donation', received=None, lookup=None):
         self.source = source
         self.received = received or timezone.localdate()
+        self.lookup = lookup
+        self.looked = set()         # 이번에 이미 찾아 본 약품 id (같은 약 여러 줄)
         self.report = Counter()     # 종류별 건수 (요약)
         self.lines = []             # 줄마다 한 일 (미리보기 목록)
         self.errors = []            # 하나라도 있으면 아무것도 넣지 않는다
@@ -492,10 +496,50 @@ class DrugImporter:
                 self.report['약품 빈 칸 채움'] += 1
                 self.lines.append(f'~ 약품 {drug.name}: 비어 있던 {"·".join({"ingredient": "성분", "usage": "용법"}[f] for f in filled)} 채움')
 
+        self.fill_from_mfds(drug)
         if row.get('batch_id'):
             self.check_existing_batch(row, drug)
         else:
             self.add_batch(row, drug)
+
+    def fill_from_mfds(self, drug):
+        """식약처 자동 채우기 - 성분·용법 중 빈 칸만, 약품명·세부 분류는 그대로. 인터넷 등이 안 되면 한 번 알리고 멈춘다"""
+        if (not self.lookup or drug.id in self.looked or drug.mfds_item_seq
+                or drug.cat1.name.startswith('약속처방') or (drug.ingredient and drug.usage)):
+            return
+        self.looked.add(drug.id)
+        try:
+            status, found, count = self.lookup(drug.name)
+        except Exception as err:    # 인터넷 없음·키 문제 (management.mfds.MfdsError) - 가져오기는 계속한다
+            self.lines.append(f'! 식약처 찾기를 멈췄습니다: {err}')
+            self.report['식약처 찾기 못 함'] += 1
+            self.lookup = None
+            return
+        if found is None:
+            if status == 'multiple':
+                self.report['식약처 후보 여러 개 (약품 탭에서 고르기)'] += 1
+                self.lines.append(f'! 식약처: {drug.name} - 후보 {count}개, [식약처에서 한꺼번에 찾기]에서 고르세요')
+            else:
+                self.report['식약처에서 못 찾음'] += 1
+                self.lines.append(f'! 식약처: {drug.name} - 찾은 품목 없음')
+            return
+
+        filled = []
+        if not drug.ingredient and found['ingredient']:
+            drug.ingredient = found['ingredient']
+            filled.append('성분')
+        if not drug.usage and found['usage']:
+            drug.usage = found['usage']
+            filled.append('용법')
+        drug.mfds_item_seq = found['item_seq']
+        drug.ingredient_codes = ','.join(found['ingredient_codes'])
+        drug.save(update_fields=['ingredient', 'usage', 'mfds_item_seq', 'ingredient_codes'])
+        self.report['식약처로 채움'] += 1
+        self.lines.append(
+            f'~ 식약처: {drug.name} ← {found["short_name"]} ({found["company"]})'
+            + (f' - {"·".join(filled)} 채움' if filled else ' - 연결만')
+            + (' (용법이 길어 앞부분만)' if '용법' in filled and found['usage_truncated'] else '')
+        )
 
     def check_existing_batch(self, row, drug):
         """배치 번호가 있는 줄 - 임시 유통기한만 채우고, 다른 차이는 알려만 준다"""

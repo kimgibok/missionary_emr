@@ -9,3 +9,7 @@ TIME_ZONE = 'Asia/Phnom_Penh'
 # DEBUG = False
 # SECRET_KEY = '새로 만든 긴 무작위 문자열'
 # ALLOWED_HOSTS = ['192.168.0.10', 'localhost']
+
+# 식약처 의약품 제품 허가정보 API 인증키 (공공데이터포털 마이페이지 → 일반 인증키 'Decoding')
+# 관리자 [약품] 모달의 [약 정보 찾기]에 쓴다. 비워 두면 그 버튼만 꺼진다.
+# MFDS_API_KEY = '여기에 인증키'

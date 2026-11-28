@@ -147,6 +147,9 @@ class Drug(models.Model):
     name = models.CharField(max_length=100)
     ingredient = models.CharField(max_length=200, blank=True)
     usage = models.CharField(max_length=200, blank=True)
+    # 식약처 의약품 제품 허가정보에서 찾아 연결한 경우 (관리자 [약 정보 찾기]) - 없으면 빈 칸
+    mfds_item_seq = models.CharField(max_length=20, blank=True)       # 식약처 품목기준코드
+    ingredient_codes = models.CharField(max_length=200, blank=True)   # 식약처 주성분 코드 'M222857,M040624' (대체약 후보를 성분 코드로 찾는 데 쓸 예정)
 
     def __str__(self):
         return self.name

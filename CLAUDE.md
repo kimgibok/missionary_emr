@@ -6,6 +6,7 @@
 
 - 인터넷이 없는 현장에서 노트북 1대를 서버로 두고, 같은 Wi-Fi(핫스팟)에 붙은 폰·노트북 여러 대가 브라우저로 접속하는 **인트라넷 앱**이다.
 - 외부 CDN, 외부 API, 클라우드 서비스에 의존하면 안 된다. 폰트·라이브러리는 전부 로컬에 번들한다.
+  **유일한 예외**: 관리자 [약 정보 찾기](식약처 API) - 출발 전 준비할 때만 쓰고, 인터넷이 없으면 그 버튼만 안 되고 나머지는 그대로 동작한다.
 - 목표: 환자 추적, 처방 관리, 약품 재고 관리, 미션별 통계. 이전 미션은 수기로 기록해서 통계를 낼 수 없었다.
 - 역할 5개: 안내팀 / 접수팀 / 진료팀 / 약국팀 / 관리자(superuser). 수술팀은 역할 이름만 있고 워크플로우는 아직 없다.
 - 개발자(사용자)가 혼자 유지보수한다. 코드는 읽고 이해할 수 있는 단순한 구조를 유지한다.
@@ -53,6 +54,7 @@ missionary_emr/
 │   ├─ serializers.py / views.py / urls.py / admin.py
 ├─ management/              관리자 전용 API (모델 없음, clinic 모델을 import해서 사용)
 │   ├─ permissions.py       IsSuperUser (is_superuser 기준, DRF IsAdminUser 아님)
+│   ├─ mfds.py              식약처 의약품 제품 허가정보 API 호출·정리 ([약 정보 찾기], 유일한 인터넷 기능)
 │   ├─ serializers.py / views.py / urls.py
 ├─ templates/
 │   ├─ login.html, select_mission.html, no_mission.html
@@ -110,6 +112,7 @@ superuser는 백엔드 권한을 전부 통과하므로 nav에서 모든 역할 
   창고 잔량은 일반 PATCH로 못 바꾸고, 실사 차이는 `adjust`(사유 필수)로만 고친다 → `StockAdjustment`(전→후·사유·누가·언제)에 이력이 남는다. 현장 잔량도 정산 전이면 같은 방식.
 - `StockAdjustment`: 재고 직접 보정 이력. `drugbatch` 또는 `mission_stock` 중 하나. 배분·정산 같은 자동 이동은 남기지 않는다.
   FK가 CASCADE라 대상을 지우면 이력도 사라지므로, 보정 이력이 있는 창고 배치·미션 재고는 삭제를 막는다(API 400).
+- `Drug.mfds_item_seq`(식약처 품목기준코드)·`ingredient_codes`(주성분 코드 'M222857,…'): [약 정보 찾기]로 식약처 품목에 연결했을 때만 채워진다. 나중에 대체약 후보를 성분 코드로 찾는 데 쓴다.
 - `SiteConfig`: 현장 설정, 행 하나(pk=1, `SiteConfig.load()`). `time_zone`(IANA 이름, 비면 `settings.TIME_ZONE`), `updated_by`, `updated_at`.
 
 **주요 업무 규칙**
@@ -157,7 +160,7 @@ superuser는 백엔드 권한을 전부 통과하므로 nav에서 모든 역할 
 | 처방약 수정 | `PATCH prescription-drugs/<pk>/` = 약국팀용(수량만 믿고 재계산 안 함), `PATCH/DELETE prescription-drugs/<pk>/clinical/` = 진료팀용(재계산됨) |
 | 조회용 | `GET departments/`, `drug-categories1/`, `drug-categories2/`, `drugs/` (진료팀 약 검색 - 정산 전·잔량 있는 이번 미션 재고가 있는 약만, 약 하나에 한 줄·잔량은 배치 합계, `?search=&cat1=&cat2=`), `drugs/categories/` (그 약들에 있는 분류 → 세부 분류 트리, 처방 화면 선택지) |
 | 약국 | `GET mission-stocks/`, `GET prescription-drugs/stats/?period=day&date= \| ?period=mission`(수령된 약만: summary·drugs + 미션 기준 runway), `GET visits/pharmacy-queue/`(오늘, 등록번호순), `GET visits/pharmacy-done/`(오늘 수령, 최신순), `GET visits/<id>/dispense-options/`, `POST visits/<id>/dispense/` `{items:[{prescription_drug, mission_stock}]}`, `POST visits/<id>/undispense/`, `POST visits/print-claim/` `{ids}` → `{claimed}` (조제 대기·조제 화면 응답에 `slip_printed_at`, `stock_issues`) |
-| 관리자 `manage/` | `GET missions/`(`is_active`), `GET visits/stats/?mission=`(진료과별 환자 수·전체 방문·실제 환자, 진료 완료 기준 + `daily` 날짜별 등록·진료 완료·약 수령·소아·성인·성별·그날 진료과별(`by_department`) + `doctors` 진료팀 멤버별 환자·처방 수·진료과별 + `doctors_others` 진료팀이 아닌 계정의 처방 건수), `GET drug-stats/?mission=`(분류별·진료과별 사용량, 다음 미션 준비표, 수령 기준), `GET mission-stocks/export/?mission=`(환자 통계·날짜별·날짜별 진료과·의사별·의사×진료과·약 분류별·진료과별·다음 미션 준비표 + `재고-분류` 시트), `GET stock-adjustments/?drugbatch=\|mission_stock=`, `GET drugs/category-tree/`(약품이 있는 분류 → 세부 분류, 개수), `GET drugs/export/`(약품+창고 배치 표준 양식 엑셀), `POST drugs/import/`(multipart `file`, `commit=1`이면 넣기 / 없으면 미리보기 → `{committed, format, summary, lines, errors}`, commit인데 오류면 400), `GET/PATCH site-config/` `{time_zone}`(서버 기준 `server_today`·`server_time`·`server_wall`·`utc_offset`, 시각 글자는 서버가 현장 시간대로 만든다), 그리고 라우터 CRUD: `drug-categories1`, `drug-categories2`, `drugs`(`?search=&cat1=&cat2=`), `drug-batches`(`?drug=&search=`, `POST <id>/adjust/`), `mission-stocks`(`?mission=&search=`, `POST <id>/adjust/`, `POST <id>/settle/`, `POST settle-bulk/` `{items:[{id, donated_qty}]}` 하나라도 틀리면 전부 취소). 사용 중인 항목 삭제는 400 |
+| 관리자 `manage/` | `GET missions/`(`is_active`), `GET visits/stats/?mission=`(진료과별 환자 수·전체 방문·실제 환자, 진료 완료 기준 + `daily` 날짜별 등록·진료 완료·약 수령·소아·성인·성별·그날 진료과별(`by_department`) + `doctors` 진료팀 멤버별 환자·처방 수·진료과별 + `doctors_others` 진료팀이 아닌 계정의 처방 건수), `GET drug-stats/?mission=`(분류별·진료과별 사용량, 다음 미션 준비표, 수령 기준), `GET mission-stocks/export/?mission=`(환자 통계·날짜별·날짜별 진료과·의사별·의사×진료과·약 분류별·진료과별·다음 미션 준비표 + `재고-분류` 시트), `GET stock-adjustments/?drugbatch=\|mission_stock=`, `GET drugs/category-tree/`(약품이 있는 분류 → 세부 분류, 개수), `GET drug-info/`(`{enabled}` 인증키 있는지) · `GET drug-info/search/?q=`(식약처 품목 찾기, 최대 20) · `GET drug-info/match/?drug=`(우리 약에 맞는 후보, `status` exact·likely·multiple·none) · `GET drug-info/<item_seq>/`(성분·용법·주성분 코드 + 참고 정보) - 인터넷이 없으면 503 + 안내, `GET drugs/export/`(약품+창고 배치 표준 양식 엑셀), `POST drugs/import/`(multipart `file`, `commit=1`이면 넣기 / 없으면 미리보기, `mfds=1`이면 식약처에서 빈 성분·용법 채우기 → `{committed, format, summary, lines, errors}`, commit인데 오류면 400), `GET/PATCH site-config/` `{time_zone}`(서버 기준 `server_today`·`server_time`·`server_wall`·`utc_offset`, 시각 글자는 서버가 현장 시간대로 만든다), 그리고 라우터 CRUD: `drug-categories1`, `drug-categories2`, `drugs`(`?search=&cat1=&cat2=`), `drug-batches`(`?drug=&search=`, `POST <id>/adjust/`), `mission-stocks`(`?mission=&search=`, `POST <id>/adjust/`, `POST <id>/settle/`, `POST settle-bulk/` `{items:[{id, donated_qty}]}` 하나라도 틀리면 전부 취소). 사용 중인 항목 삭제는 400 |
 
 권한 클래스(`clinic/permissions.py`): `IsInfoTeam`, `IsReceptionTeam`, `IsClinicalTeam`, `IsPharmacyTeam`와 조합용(`IsInfoOrReceptionTeam` 등).
 모두 `role_permission(*역할이름)` 팩토리로 만들며, **superuser는 항상 통과**한다. 역할 이름 문자열('안내팀', '접수팀', '진료팀', '약국팀')은 DB의 `Role.name`과 정확히 같아야 한다.
@@ -173,7 +176,7 @@ POST처럼 대상 객체가 없는 요청은 뷰의 `perform_create`에서 `owns
 - 주석, docstring, 사용자에게 보이는 문구는 한국어로 쓴다.
 - 새 기능은 `feature/기능이름` 브랜치에서 작업하고 PR로 합친다. 커밋 메시지는 한국어로 "무엇을 했는지" 한 줄로 쓴다.
 - 모델·API를 바꿀 때는 `makemigrations <앱>` → `migrate` → `curl` 또는 브라우저로 직접 확인한다.
-- 외부 CDN, 외부 패키지(프론트), 인터넷이 필요한 기능은 쓰지 않는다.
+- 외부 CDN, 외부 패키지(프론트), 인터넷이 필요한 기능은 쓰지 않는다(예외: `management/mfds.py` 하나 - 준비할 때만 쓰는 [약 정보 찾기]).
 
 **백엔드**
 - 역할 확인은 `permissions.py`의 클래스로만 한다. 뷰 안에서 `if role == ...`를 직접 쓰지 않는다.
@@ -258,8 +261,16 @@ POST처럼 대상 객체가 없는 요청은 뷰의 `perform_create`에서 `owns
    임시 유통기한은 빈 칸으로 내보낸다. 배치 번호가 있는 줄 = 기존 배치: 미확인이면 유통기한만 채우고, 입고량·잔량·출처 등이 다르면 **고치지 않고 '다름'으로 알려만 준다**(재고 숫자는 [잔량 보정]으로만).
    배치 번호 없는 줄 = 새 입고(같은 배치면 건너뜀, 같은 약품·출처·포장·입고량의 미확인 배치가 있으면 유통기한만 채움). 엑셀 유통기한이 비면 유통기한은 빼고 같은 배치인지 본다(날짜를 채운 배치를 옛 엑셀로 다시 넣어도 두 번 안 들어감).
    오류는 줄마다 전부 모아 한 번에 보여주고, 하나라도 있으면 아무것도 넣지 않는다. 옛 '약품 리스트' 양식도 그대로 받는다(같은 코드).
-3. 약 정보 자동 채우기 - 결정: **(a) 준비할 때만 온라인 조회**. [약품] 모달 [약 정보 찾기] → 식약처 공공데이터 API(data.go.kr, 키는 `local_settings.py`)로 이름 검색 → 사람이 결과를 골라 성분·용법을 채운다. 인터넷이 없으면 버튼만 '인터넷 연결 필요'로 꺼진다.
-   '인터넷이 필요한 기능은 쓰지 않는다' 규칙의 **유일한 예외**(현장 업무에는 쓰지 않는 준비용 기능). 만들기 전에 API 이름·항목을 실제 문서로 확인한다. 약학정보원은 공개 API가 아닐 수 있어 제외.
+3. 약 정보 자동 채우기 → `feature/drug-info-lookup`. [약품] 모달 [약 정보 찾기 (식약처)] → 이름으로 찾기 → 품목 고르기 → 성분·용법·세부 분류 [넣기]/[모두 넣기] → 사람이 [저장](품목코드·주성분 코드도 같이 저장).
+   API: `https://apis.data.go.kr/1471000/DrugPrdtPrmsnInfoService08` 목록 `getDrugPrdtPrmsnInq08`·상세 `getDrugPrdtPrmsnDtlInq08`(2026-11 실제 호출로 확인, 문서엔 기능별 주소가 없음). 키는 `config/local_settings.py`의 `MFDS_API_KEY`(Encoding 키여도 됨 - 디코딩해서 씀), 서버에서만 쓴다.
+   성분은 **영어로만**: 하나면 영문 + 분량('~로서 60mg' 표기가 있으면 그것), 복합제는 영문 이름만 넣고 분량은 사람이 적는다(식약처가 영문·분량을 서로 다른 순서로 줘서 붙이면 시너젯 분량이 뒤바뀜). 화면에 한글 원료+분량(`material_kr`)을 참고로 보여준다.
+   용법은 200자까지(넘으면 앞부분 + 줄여 달라는 안내), 효능효과·용법 전문·포장·저장방법은 참고로만 보여준다. 세부 분류는 식약처 분류 이름과 같은 것이 있으면 골라 준다.
+   이름 맞추기(`mfds.match`): 검색어 = 괄호·뒤쪽 함량을 뗀 이름(띄어쓰기가 있으면 앞 단어), 비교 = 띄어쓰기 무시·mg=밀리그램.
+   같은 이름 하나 = 맞음(exact), 없고 앞부분이 같은 정상 품목 하나 = 아마 맞음(likely), 그 밖 = 후보 여러 개 / 못 찾음. 2026-11 실제 약 73개: 맞음 35·아마 맞음 12·여러 개 18·못 찾음 8.
+   - [약품] 탭 [식약처에서 한꺼번에 찾기]: 연결 안 된 약(약속처방 제외)을 하나씩 찾아 후보를 보여주고 맞음·아마 맞음은 미리 체크 → 체크한 것만 채움.
+     기본은 빈 성분·용법만(선택: 있어도 바꾸기 / 세부 분류도 맞추기), 약품명은 안 바꿈.
+   - [엑셀 올리기] '식약처에서 비어 있는 성분·용법 채우기': 맞음·아마 맞음만 빈 칸 채움(약품명·세부 분류 그대로), 나머지는 미리보기에 '약품 탭에서 고르기'로 알림.
+     `clinic/drug_excel.py`는 management를 직접 부르지 않고 `DrugImporter(lookup=mfds.auto_fill_values)`로 받는다. 식약처 응답은 10분 캐시(미리보기 뒤 가져오기가 다시 오래 걸리지 않게).
 
 **다음 미션**: 2027년 2월 마다가스카르(시간대 `Indian/Antananarivo`). 준비는 1월부터 하므로 DB의 미션 기간은 1월로 잡아 두었다. 지금은 테스트 기간이다.
 
