@@ -4,7 +4,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     DrugCategory1ViewSet, DrugCategory2ViewSet, DrugViewSet, DrugBatchViewSet, MissionStockViewSet,
     MissionListView, VisitStatsView, DrugStatsView, MissionStockExportView, StockAdjustmentListView, SiteConfigView,
-    DrugInfoStatusView, DrugInfoSearchView, DrugInfoDetailView,
+    DrugInfoStatusView, DrugInfoSearchView, DrugInfoMatchView, DrugInfoDetailView,
 )
 
 router = DefaultRouter()
@@ -24,5 +24,6 @@ urlpatterns = [
     path('site-config/', SiteConfigView.as_view(), name='site-config'),
     path('drug-info/', DrugInfoStatusView.as_view(), name='drug-info-status'),
     path('drug-info/search/', DrugInfoSearchView.as_view(), name='drug-info-search'),
+    path('drug-info/match/', DrugInfoMatchView.as_view(), name='drug-info-match'),   # <item_seq>/보다 먼저
     path('drug-info/<str:item_seq>/', DrugInfoDetailView.as_view(), name='drug-info-detail'),
 ] + router.urls

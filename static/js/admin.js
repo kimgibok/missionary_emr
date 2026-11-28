@@ -777,10 +777,8 @@ let mfdsLink = null;            // 이 모달에서 고른 식약처 품목 {ite
 let lookupResults = [];         // 마지막 찾기 결과 ([다른 품목 고르기]로 돌아갈 때)
 let lookupDetail = null;        // 고른 품목의 상세 + 맞는 세부 분류
 
-async function setupDrugLookup() {
-    const btn = byId('dm-lookup-btn');
-    btn.addEventListener('click', openLookupPanel);
-    byId('dm-lookup').addEventListener('click', onLookupClick);
+// 서버에 식약처 인증키가 있는지 - 한 번만 묻는다
+async function ensureDrugInfoStatus() {
     if (drugInfoEnabled === null) {
         try {
             drugInfoEnabled = (await apiFetch('/manage/drug-info/')).enabled;
@@ -788,6 +786,14 @@ async function setupDrugLookup() {
             drugInfoEnabled = false;
         }
     }
+    return drugInfoEnabled;
+}
+
+async function setupDrugLookup() {
+    const btn = byId('dm-lookup-btn');
+    btn.addEventListener('click', openLookupPanel);
+    byId('dm-lookup').addEventListener('click', onLookupClick);
+    await ensureDrugInfoStatus();
     if (!drugInfoEnabled && byId('dm-lookup-btn') === btn) {
         btn.disabled = true;
         byId('dm-lookup-status').textContent = '식약처 API 인증키가 없어 쓸 수 없습니다 (config/local_settings.py)';
@@ -921,6 +927,176 @@ function applyLookup(fields) {
     byId('dm-lookup-status').textContent = `${done.join('·')} 넣음 - [저장]해야 반영됩니다`;
 }
 
+// ----- 식약처에서 한꺼번에 찾기 -----
+// 식약처에 아직 연결 안 된 약(약속처방 세트 제외)을 하나씩 찾아 약마다 후보를 보여주고, 체크한 것만 채운다.
+// 이름이 맞는 품목(맞음·아마 맞음)은 미리 체크된다. 기본은 빈 성분·용법만 채우고, 약품명은 바꾸지 않는다.
+
+const MATCH_LABELS = { exact: '맞음', likely: '아마 맞음', multiple: '후보 여러 개', none: '못 찾음' };
+let bulkRows = [];          // [{drug, status, candidates, choice(후보 위치 또는 -1), checked}]
+let bulkRunning = false;    // 찾기·채우기가 도는 중인지 (모달을 닫으면 멈춘다)
+
+function bulkModalOpen() {
+    return byId('modal-overlay').classList.contains('open') && Boolean(byId('bulk-rows'));
+}
+
+async function openBulkModal() {
+    if (!(await ensureDrugInfoStatus())) {
+        showToast('식약처 API 인증키가 없어 쓸 수 없습니다. (config/local_settings.py)', true);
+        return;
+    }
+    let drugs;
+    try {
+        drugs = (await apiFetch('/manage/drugs/?page_size=500')).results;
+    } catch (err) {
+        showToast(err.message, true);
+        return;
+    }
+    const targets = drugs.filter((d) => !d.mfds_item_seq && !d.cat1_name.startsWith('약속처방'));
+    bulkRows = targets.map((d) => ({ drug: d, status: 'waiting', candidates: [], choice: -1, checked: false }));
+    openModal({
+        title: '식약처에서 한꺼번에 찾기',
+        bodyHtml: `
+            <p class="modal-note">식약처에 아직 연결 안 된 약 ${targets.length}개를 이름으로 찾습니다 (약속처방 세트는 빼고).
+                이름이 맞는 품목은 미리 체크됩니다. 확인하고 [체크한 약 채우기]를 누르세요. 인터넷이 필요합니다.</p>
+            <div class="toggle-row">
+                <label class="toggle"><input type="checkbox" id="bulk-overwrite"><span>성분·용법이 있어도 식약처 것으로 바꾸기</span></label>
+                <label class="toggle"><input type="checkbox" id="bulk-cat2"><span>세부 분류도 식약처 분류에 맞추기</span></label>
+            </div>
+            <p class="bulk-progress" id="bulk-progress"></p>
+            <div class="bulk-rows" id="bulk-rows"></div>
+            <p class="error-message" id="bulk-error"></p>`,
+        confirmLabel: '체크한 약 채우기',
+        onConfirm: () => { applyBulk(); return false; },
+        wide: true,
+    });
+    byId('bulk-rows').addEventListener('change', onBulkChange);
+    renderBulkRows();
+    runBulkSearch();
+}
+
+function bulkRowHtml(row, i) {
+    const tag = row.status === 'waiting'
+        ? '<span class="doctor-tag waiting">찾는 중</span>'
+        : `<span class="doctor-tag${row.status === 'exact' || row.status === 'likely' ? '' : ' waiting'}">${MATCH_LABELS[row.status] || row.status}</span>`;
+    const picked = row.candidates[row.choice];
+    const select = row.candidates.length === 0 ? '' : `
+        <select class="field-input bulk-choice" data-index="${i}" aria-label="${escapeHtml(row.drug.name)} 식약처 품목">
+            <option value="-1">고르세요 (${row.candidates.length}개)</option>
+            ${row.candidates.map((c, j) => `<option value="${j}"${j === row.choice ? ' selected' : ''}>
+                ${escapeHtml(`${c.short_name} · ${c.company}${c.canceled ? ' · 허가 취소' : ''}`)}</option>`).join('')}
+        </select>`;
+    return `
+        <div class="bulk-row${row.checked ? ' is-checked' : ''}">
+            <input type="checkbox" class="bulk-check" data-index="${i}"${row.checked ? ' checked' : ''}
+                   ${picked ? '' : ' disabled'} aria-label="${escapeHtml(row.drug.name)} 채우기">
+            <span class="bulk-name">
+                <strong>${escapeHtml(row.drug.name)}</strong> ${tag}
+                <span class="lookup-item-meta">${escapeHtml(row.drug.ingredient || '성분 없음')}${row.drug.usage ? '' : ' · 용법 없음'}</span>
+            </span>
+            <span class="bulk-pick">${select}
+                ${picked ? `<span class="lookup-item-meta">${escapeHtml([picked.kind, picked.product_type, picked.ingredient].filter(Boolean).join(' · '))}</span>` : ''}
+            </span>
+        </div>`;
+}
+
+function renderBulkRows() {
+    if (!bulkModalOpen()) return;
+    byId('bulk-rows').innerHTML = bulkRows.length === 0
+        ? emptyRowHtml('식약처에 연결 안 된 약이 없습니다.')
+        : bulkRows.map(bulkRowHtml).join('');
+    const checked = bulkRows.filter((r) => r.checked).length;
+    byId('modal-confirm').textContent = `체크한 약 채우기 (${checked}개)`;
+}
+
+async function runBulkSearch() {
+    bulkRunning = true;
+    for (let i = 0; i < bulkRows.length; i += 1) {
+        if (!bulkModalOpen()) break;    // 모달을 닫으면 멈춘다
+        byId('bulk-progress').textContent = `찾는 중… ${i + 1} / ${bulkRows.length}`;
+        const row = bulkRows[i];
+        try {
+            const result = await apiFetch(`/manage/drug-info/match/?drug=${row.drug.id}`);
+            row.status = result.status;
+            row.candidates = result.candidates;
+            row.choice = result.best === null ? -1 : result.best;
+            row.checked = result.best !== null;
+        } catch (err) {
+            byId('bulk-progress').textContent = `찾기를 멈췄습니다: ${err.message}`;
+            bulkRunning = false;
+            renderBulkRows();
+            return;
+        }
+        renderBulkRows();
+    }
+    bulkRunning = false;
+    if (bulkModalOpen()) {
+        const count = (s) => bulkRows.filter((r) => r.status === s).length;
+        byId('bulk-progress').textContent = `다 찾았습니다 - 맞음 ${count('exact')} · 아마 맞음 ${count('likely')} · `
+            + `후보 여러 개 ${count('multiple')} · 못 찾음 ${count('none')}. 후보 여러 개는 직접 골라 체크하세요.`;
+    }
+}
+
+function onBulkChange(e) {
+    const i = Number(e.target.dataset.index);
+    const row = bulkRows[i];
+    if (!row) return;
+    if (e.target.classList.contains('bulk-choice')) {
+        row.choice = Number(e.target.value);
+        row.checked = row.choice >= 0;     // 품목을 고르면 체크, '고르세요'로 돌리면 해제
+    } else if (e.target.classList.contains('bulk-check')) {
+        row.checked = e.target.checked;
+    }
+    renderBulkRows();
+}
+
+// 체크한 약마다 상세를 불러 채운다 - 기본은 빈 칸만, 약품명은 그대로
+async function applyBulk() {
+    if (bulkRunning || isBusy) {
+        byId('bulk-error').textContent = '아직 찾는 중입니다. 다 찾은 뒤에 눌러 주세요.';
+        return;
+    }
+    const rows = bulkRows.filter((r) => r.checked && r.candidates[r.choice]);
+    if (rows.length === 0) {
+        byId('bulk-error').textContent = '채울 약을 체크해 주세요.';
+        return;
+    }
+    const overwrite = byId('bulk-overwrite').checked;
+    const withCat2 = byId('bulk-cat2').checked;
+    isBusy = true;
+    bulkRunning = true;
+    const failed = [];
+    let done = 0;
+    for (const row of rows) {
+        byId('bulk-progress').textContent = `채우는 중… ${done + failed.length + 1} / ${rows.length}`;
+        const picked = row.candidates[row.choice];
+        try {
+            const d = await apiFetch(`/manage/drug-info/${encodeURIComponent(picked.item_seq)}/`);
+            const body = { mfds_item_seq: d.item_seq, ingredient_codes: d.ingredient_codes.join(',') };
+            if (d.ingredient && (overwrite || !row.drug.ingredient)) body.ingredient = d.ingredient;
+            if (d.usage && (overwrite || !row.drug.usage)) body.usage = d.usage;
+            const cat2 = withCat2 ? matchCat2(picked.product_type) : null;
+            if (cat2 && cat2.id !== row.drug.cat2) body.cat2 = cat2.id;
+            await apiFetch(`/manage/drugs/${row.drug.id}/`, { method: 'PATCH', body: JSON.stringify(body) });
+            done += 1;
+        } catch (err) {
+            failed.push(`${row.drug.name}(${err.message})`);
+        }
+    }
+    isBusy = false;
+    bulkRunning = false;
+    loadDrugTree();
+    loadDrugs();
+    if (failed.length > 0) {
+        byId('bulk-progress').textContent = `${done}개를 채웠습니다.`;
+        byId('bulk-error').textContent = `실패 ${failed.length}개: ${failed.join(', ')}`;
+        return;
+    }
+    closeModal();
+    showToast(`식약처 정보로 ${done}개를 채웠습니다. 복합제는 성분 분량을, 긴 용법은 현장용으로 다듬어 주세요.`);
+}
+
+byId('drug-mfds-bulk-btn').addEventListener('click', openBulkModal);
+
 function onLookupClick(e) {
     const btn = e.target.closest('[data-lookup]');
     if (!btn) return;
@@ -951,9 +1127,12 @@ byId('drug-export-btn').addEventListener('click', async () => {
 });
 
 let importFile = null;      // 고른 엑셀 파일 - 미리보기 뒤 [가져오기]에서 같은 파일을 다시 보낸다
+let importMfds = false;     // 식약처에서 빈 성분·용법 채우기를 골랐는지 - [가져오기]에서도 같게
 
-function openImportModal() {
+async function openImportModal() {
     importFile = null;
+    importMfds = false;
+    await ensureDrugInfoStatus();
     openModal({
         title: '약품 엑셀 올리기',
         bodyHtml: `
@@ -961,6 +1140,13 @@ function openImportModal() {
                 먼저 미리보기가 나오고, 확인한 뒤 가져옵니다.</p>
             <label class="field-label" for="im-file">엑셀 파일 *</label>
             <input class="field-input" type="file" id="im-file" accept=".xlsx">
+            ${drugInfoEnabled ? `
+                <div class="toggle-row">
+                    <label class="toggle"><input type="checkbox" id="im-mfds">
+                        <span>식약처에서 비어 있는 성분·용법 채우기</span></label>
+                </div>
+                <p class="modal-note">인터넷이 필요하고, 약이 많으면 1~2분 걸립니다. 이름이 딱 맞는 품목만 채우고,
+                    후보가 여럿인 약은 [식약처에서 한꺼번에 찾기]에서 고르세요. 약품명·세부 분류는 바꾸지 않습니다.</p>` : ''}
             <p class="error-message" id="im-error"></p>`,
         confirmLabel: '미리보기',
         onConfirm: () => { previewImport(); return false; },
@@ -990,10 +1176,12 @@ async function previewImport() {
     const file = byId('im-file').files[0];
     if (!file) { errorEl.textContent = '엑셀 파일을 골라주세요.'; return; }
 
+    importMfds = Boolean(byId('im-mfds') && byId('im-mfds').checked);
     const form = new FormData();
     form.append('file', file);
+    if (importMfds) form.append('mfds', '1');
     isBusy = true;
-    errorEl.textContent = '읽는 중…';
+    errorEl.textContent = importMfds ? '읽고 식약처에서 찾는 중… (1~2분 걸릴 수 있어요)' : '읽는 중…';
     let result;
     try {
         result = await apiUpload('/manage/drugs/import/', form);
@@ -1025,6 +1213,7 @@ async function commitImport() {
     const form = new FormData();
     form.append('file', importFile);
     form.append('commit', '1');
+    if (importMfds) form.append('mfds', '1');   // 미리보기에서 찾은 결과는 서버가 10분 기억해서 다시 오래 걸리지 않는다
     isBusy = true;
     let result;
     try {

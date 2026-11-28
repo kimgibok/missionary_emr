@@ -13,6 +13,7 @@
 import html
 import json
 import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -51,8 +52,22 @@ def is_enabled():
     return bool(api_key())
 
 
+_cache = {}            # (op, 파라미터) → (시각, items) - 엑셀 미리보기 뒤 [가져오기]에서 같은 품목을 다시 부르지 않게
+CACHE_SECONDS = 600
+
+
 def call(op, **params):
-    """API 한 번 부르기 → items 목록. 키가 없거나 인터넷이 없거나 API가 오류를 주면 MfdsError"""
+    """API 한 번 부르기 → items 목록 (10분 캐시). 키가 없거나 인터넷이 없거나 API가 오류를 주면 MfdsError"""
+    cache_key = (op, tuple(sorted(params.items())))
+    hit = _cache.get(cache_key)
+    if hit and time.time() - hit[0] < CACHE_SECONDS:
+        return hit[1]
+    items = _call(op, **params)
+    _cache[cache_key] = (time.time(), items)
+    return items
+
+
+def _call(op, **params):
     key = api_key()
     if not key:
         raise MfdsError(NOT_SET, status=503)
@@ -226,3 +241,77 @@ def detail(item_seq):
         'valid_term': value(d, 'VALID_TERM'),
         'chart': value(d, 'CHART'),
     }
+
+
+# =====================================================
+# 우리 약 이름 ↔ 식약처 품목 맞춰 보기 (한꺼번에 찾기·엑셀 올리기 자동 채우기 공용)
+# =====================================================
+
+UNIT_WORDS = [('mcg', '마이크로그램'), ('μg', '마이크로그램'), ('mg', '밀리그램'), ('ml', '밀리리터'), ('g', '그램')]
+
+
+def match_key(name):
+    """비교용 이름 - 괄호·수출명 빼고, 띄어쓰기 무시, 소문자, 단위를 한글로 ('세바클캡슐250mg' = '세바클캡슐250밀리그램')"""
+    key = re.sub(r'\[[^\]]*\]|\([^)]*\)', '', name).lower()
+    key = re.sub(r'\s+', '', key)
+    for unit, word in UNIT_WORDS:
+        key = re.sub(rf'(?<=[\d.]){unit}', word, key)
+    return key
+
+
+def search_query(name):
+    """식약처 검색어 - 괄호·뒤쪽 함량을 떼고, 띄어쓰기가 있으면 앞 단어 ('네메올정20mg' → '네메올정', '베아로반 연고' → '베아로반')"""
+    query = re.sub(r'\[[^\]]*\]|\([^)]*\)', '', name).strip()
+    query = re.sub(r'\s*\d[\d.,/]*\s*(mg|g|ml|mL|mcg|μg|%|밀리그램|그램|밀리리터)?\s*$', '', query).strip()
+    if ' ' in query:
+        query = query.split(' ')[0]
+    return query
+
+
+def match(name):
+    """
+    우리 약 이름에 맞는 식약처 품목 후보.
+    status: 'exact'(이름이 같은 품목이 하나) / 'likely'(같은 건 없고 우리 이름으로 시작하는 정상 품목이 하나)
+            / 'multiple'(후보 여러 개 - 사람이 고름) / 'none'(못 찾음)
+    candidates: 맞는 순서로 정렬(같은 이름 → 우리 이름으로 시작 → 정상 → 허가 취소), best: 고를 만한 후보 위치 또는 None
+    """
+    query = search_query(name)
+    if len(query) < 2:
+        return {'query': query, 'status': 'none', 'candidates': [], 'best': None}
+    results = search(query)
+    key = match_key(name)
+    exact = [r for r in results if match_key(r['short_name']) == key]
+    # 앞부분이 같은 정상 품목 - 식약처 이름이 더 길거나('알나졸' → '알나졸정400밀리그램') 우리 이름이 더 길거나('아젤론정 1mg' → '아젤론정')
+    prefix = [
+        r for r in results
+        if r not in exact and not r['canceled']
+        and (match_key(r['short_name']).startswith(key) or key.startswith(match_key(r['short_name'])))
+    ]
+
+    def rank(r):
+        return (r not in exact, r not in prefix, r['canceled'], r['short_name'])
+
+    candidates = sorted(results, key=rank)
+    if len(exact) == 1:
+        status = 'exact'
+    elif not exact and len(prefix) == 1:
+        status = 'likely'
+    elif results:
+        status = 'multiple'
+    else:
+        status = 'none'
+    return {
+        'query': query, 'status': status, 'candidates': candidates,
+        'best': 0 if status in ('exact', 'likely') else None,
+    }
+
+
+def auto_fill_values(name):
+    """
+    엑셀 올리기 자동 채우기용 - 이름이 'exact'·'likely'로 맞을 때만 상세를 불러 값을 돌려준다.
+    (상태, 상세 또는 None, 후보 수). 인터넷·키 문제는 MfdsError로 그대로 올린다.
+    """
+    result = match(name)
+    if result['status'] not in ('exact', 'likely'):
+        return result['status'], None, len(result['candidates'])
+    return result['status'], detail(result['candidates'][0]['item_seq']), len(result['candidates'])
